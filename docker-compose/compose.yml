@@ -1,0 +1,65 @@
+services:
+  api-gateway-container:
+    image: selimhorri/api-gateway-ecommerce-boot:0.1.0
+    ports:
+      - "8080:8080"
+    networks:
+      - microservices_network
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_ZIPKIN_BASE-URL=http://zipkin:9411
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://cloud-config-container:9296/
+      - EUREKA_CLIENT_REGION=default
+      - EUREKA_CLIENT_AVAILABILITYZONES_DEFAULT=myzone
+      - EUREKA_CLIENT_SERVICEURL_MYZONE=http://service-discovery-container:8761/eureka
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-discovery-container:8761/eureka/
+
+  user-service-container:
+    image: selimhorri/user-service-ecommerce-boot:0.1.0
+    ports:
+      - "8700:8700"
+    networks:
+      - microservices_network
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_ZIPKIN_BASE-URL=http://zipkin:9411
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://cloud-config-container:9296/
+      - EUREKA_CLIENT_REGION=default
+      - EUREKA_CLIENT_AVAILABILITYZONES_DEFAULT=myzone
+      - EUREKA_CLIENT_SERVICEURL_MYZONE=http://service-discovery-container:8761/eureka
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-discovery-container:8761/eureka/
+
+  product-service-container:
+    image: selimhorri/product-service-ecommerce-boot:0.1.0
+    ports:
+      - "8500:8500"
+    networks:
+      - microservices_network
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_ZIPKIN_BASE-URL=http://zipkin:9411
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://cloud-config-container:9296/
+      - EUREKA_CLIENT_REGION=default
+      - EUREKA_CLIENT_AVAILABILITYZONES_DEFAULT=myzone
+      - EUREKA_CLIENT_SERVICEURL_MYZONE=http://service-discovery-container:8761/eureka
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-discovery-container:8761/eureka/
+
+  order-service-container:
+    image: selimhorri/order-service-ecommerce-boot:0.1.0
+    ports:
+      - "8300:8300"
+    networks:
+      - microservices_network
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_ZIPKIN_BASE-URL=http://zipkin:9411
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://cloud-config-container:9296/
+      - EUREKA_CLIENT_REGION=default
+      - EUREKA_CLIENT_AVAILABILITYZONES_DEFAULT=myzone
+      - EUREKA_CLIENT_SERVICEURL_MYZONE=http://service-discovery-container:8761/eureka
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-discovery-container:8761/eureka/
+
+networks:
+  microservices_network:
+    name: microservices_network
+    external: true
