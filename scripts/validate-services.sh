@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Script para validar que los 6 servicios están funcionando correctamente
+# Script para validar que los servicios están funcionando correctamente
 # Uso: ./validate-services.sh
 
 set -e
 
-echo "🔍 Validando los 6 servicios principales..."
+echo "🔍 Validando los servicios del ecommerce..."
 echo ""
 
 # Colores
@@ -35,23 +35,21 @@ test_service() {
     fi
 }
 
-echo -e "${BLUE}=== Servicios Base ===${NC}"
+echo -e "${BLUE}=== Servicios Base (Core) ===${NC}"
 test_service "Eureka" "http://localhost:8761/eureka/apps" "200"
 test_service "Config Server" "http://localhost:9296/actuator/health" "200"
 test_service "Zipkin" "http://localhost:9411" "200"
 
 echo ""
-echo -e "${BLUE}=== 6 Servicios Principales ===${NC}"
-test_service "API Gateway" "http://localhost:8080/app/actuator/health" "200"
-test_service "User Service" "http://localhost:8700/user-service/actuator/health" "200"
-test_service "Product Service" "http://localhost:8500/product-service/actuator/health" "200"
-test_service "Order Service" "http://localhost:8300/order-service/actuator/health" "200"
-
-echo ""
-echo -e "${BLUE}=== Endpoints de Negocio ===${NC}"
-test_service "GET /users" "http://localhost:8080/app/api/users" "200"
-test_service "GET /products" "http://localhost:8080/app/api/products" "200"
-test_service "GET /orders" "http://localhost:8080/app/api/orders" "200"
+echo -e "${BLUE}=== Servicios Principales ===${NC}"
+test_service "API Gateway" "http://localhost:8080/actuator/health" "200"
+test_service "User Service" "http://localhost:8700/actuator/health" "200"
+test_service "Product Service" "http://localhost:8500/actuator/health" "200"
+test_service "Order Service" "http://localhost:8300/actuator/health" "200"
+test_service "Payment Service" "http://localhost:8400/actuator/health" "200"
+test_service "Favourite Service" "http://localhost:8800/actuator/health" "200"
+test_service "Shipping Service" "http://localhost:8600/actuator/health" "200"
+test_service "Proxy Client" "http://localhost:8900/actuator/health" "200"
 
 echo ""
 echo -e "${BLUE}=== Servicios Registrados en Eureka ===${NC}"
@@ -75,6 +73,7 @@ if [ $FAILED -gt 0 ]; then
     echo "  1. Verifica logs: docker compose logs -f api-gateway-container"
     echo "  2. Verifica redes: docker network ls"
     echo "  3. Verifica contenedores: docker ps"
+    echo "  4. Verifica si los servicios están registrados en Eureka"
     exit 1
 else
     echo -e "${GREEN}✅ ¡Todos los servicios están funcionando!${NC}"
