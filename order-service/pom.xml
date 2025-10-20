@@ -5,11 +5,14 @@
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<parent>
-		<groupId>com.selimhorri</groupId>
-		<artifactId>ecommerce-microservice-backend</artifactId>
-		<version>0.1.0</version>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>2.5.7</version>
+		<relativePath />
 	</parent>
+	<groupId>com.selimhorri</groupId>
 	<artifactId>order-service</artifactId>
+	<version>0.1.0</version>
 	<name>order-service</name>
 	<description>Spring Boot microservice</description>
 	<packaging>jar</packaging>
@@ -18,6 +21,7 @@
 		<java.version>11</java.version>
 		<spring-cloud.version>2020.0.4</spring-cloud.version>
 		<testcontainers.version>1.16.0</testcontainers.version>
+		<lombok.version>1.18.30</lombok.version>
 	</properties>
 	
 	<dependencies>
@@ -73,6 +77,11 @@
 			<artifactId>mysql</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 	
 	<dependencyManagement>
@@ -113,7 +122,3 @@
 	</build>
 	
 </project>
-
-
-
-
