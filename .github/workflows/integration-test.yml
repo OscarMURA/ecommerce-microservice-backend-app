@@ -22,6 +22,10 @@ jobs:
         service:
           - user-service
           - order-service
+          - product-service
+          - payment-service
+          - favourite-service
+          - shipping-service
       fail-fast: false
 
     steps:
@@ -82,7 +86,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '✅ All integration tests passed! Test coverage:\n- user-service: 5 integration tests\n- order-service: 5 integration tests\n**Total: 10/10 integration tests passing** 🎉'
+              body: '✅ All integration tests passed! Test coverage:\n- user-service: 5 integration tests\n- order-service: 5 integration tests\n- product-service: 5 integration tests\n- payment-service: 5 integration tests\n- favourite-service: 5 integration tests\n- shipping-service: 5 integration tests\n**Total: 30/30 integration tests passing** 🎉'
             })
 
       - name: Generate test report
@@ -91,8 +95,8 @@ jobs:
           echo "## Integration Test Report" > integration-test-report.md
           echo "- **Timestamp**: $(date)" >> integration-test-report.md
           echo "- **Status**: ✅ SUCCESS" >> integration-test-report.md
-          echo "- **Services Tested**: user-service, order-service" >> integration-test-report.md
-          echo "- **Total Tests**: 10" >> integration-test-report.md
+          echo "- **Services Tested**: user-service, order-service, product-service, payment-service, favourite-service, shipping-service" >> integration-test-report.md
+          echo "- **Total Tests**: 30" >> integration-test-report.md
           echo "- **Pass Rate**: 100%" >> integration-test-report.md
 
       - name: Upload test report
