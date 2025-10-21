@@ -1,8 +1,6 @@
 spring:
   application:
     name: e2e-tests
-  profiles:
-    active: test
   
   # Database configuration for E2E tests
   datasource:
