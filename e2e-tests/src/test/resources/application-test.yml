@@ -1,0 +1,56 @@
+spring:
+  application:
+    name: e2e-tests
+  
+  # Database configuration for E2E tests
+  datasource:
+    url: jdbc:h2:mem:testdb_e2e
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+  
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    database-platform: org.hibernate.dialect.H2Dialect
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+  
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  
+  # Disable service discovery for E2E tests
+  cloud:
+    service-registry:
+      auto-registration:
+        enabled: false
+    discovery:
+      enabled: false
+
+# Eureka configuration
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+  instance:
+    prefer-ip-address: true
+
+# Logging configuration
+logging:
+  level:
+    com.selimhorri.app: DEBUG
+    org.springframework.web: INFO
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+
+# Test configuration
+test:
+  e2e:
+    enabled: true
+    timeout: 30000
+    retry-attempts: 3
