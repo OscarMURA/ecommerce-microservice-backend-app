@@ -7,14 +7,12 @@ import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
-import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.boot.web.server.LocalServerPort;
 import org.springframework.http.*;
 import org.springframework.test.context.ActiveProfiles;
 
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -60,8 +58,6 @@ class E2EUserJourneyTest {
                 .lastName("Pérez")
                 .email("juan.perez@email.com")
                 .phone("+57 300 123 4567")
-                .createdAt(Instant.now())
-                .updatedAt(Instant.now())
                 .build();
 
         // ACT 1 - Register new user
@@ -87,8 +83,6 @@ class E2EUserJourneyTest {
                 .username("juan.perez")
                 .password("securePassword123")
                 .userId(createdUserId)
-                .createdAt(Instant.now())
-                .updatedAt(Instant.now())
                 .build();
 
         HttpEntity<CredentialDto> credentialRequest = new HttpEntity<>(credential, headers);
@@ -109,8 +103,6 @@ class E2EUserJourneyTest {
                 .postalCode("110111")
                 .city("Bogotá")
                 .userId(createdUserId)
-                .createdAt(Instant.now())
-                .updatedAt(Instant.now())
                 .build();
 
         HttpEntity<AddressDto> addressRequest = new HttpEntity<>(address, headers);
@@ -147,8 +139,6 @@ class E2EUserJourneyTest {
         CategoryDto category = CategoryDto.builder()
                 .categoryTitle("Electrónicos")
                 .imageUrl("https://example.com/electronics.jpg")
-                .createdAt(Instant.now())
-                .updatedAt(Instant.now())
                 .build();
 
         // ACT 1 - Create product category
@@ -176,8 +166,6 @@ class E2EUserJourneyTest {
                 .priceUnit(1200.0)
                 .quantity(10)
                 .categoryId(categoryId)
-                .createdAt(Instant.now())
-                .updatedAt(Instant.now())
                 .build();
 
         ProductDto product2 = ProductDto.builder()
@@ -187,8 +175,6 @@ class E2EUserJourneyTest {
                 .priceUnit(600.0)
                 .quantity(25)
                 .categoryId(categoryId)
-                .createdAt(Instant.now())
-                .updatedAt(Instant.now())
                 .build();
 
         HttpEntity<ProductDto> product1Request = new HttpEntity<>(product1, headers);
@@ -215,7 +201,8 @@ class E2EUserJourneyTest {
         createdProductId = product1Response.getBody().getProductId();
 
         // ACT 3 - Browse all products
-        ResponseEntity<DtoCollectionResponse<ProductDto>> productsResponse = restTemplate.exchange(
+        @SuppressWarnings("rawtypes")
+        ResponseEntity<DtoCollectionResponse> productsResponse = restTemplate.exchange(
                 baseUrl + "/api/products",
                 HttpMethod.GET,
                 new HttpEntity<>(headers),
@@ -235,8 +222,6 @@ class E2EUserJourneyTest {
         OrderDto newOrder = OrderDto.builder()
                 .orderDesc("Orden de compra - Laptop Gaming")
                 .userId(createdUserId)
-                .createdAt(Instant.now())
-                .updatedAt(Instant.now())
                 .build();
 
         // ACT 1 - Create order
@@ -262,8 +247,6 @@ class E2EUserJourneyTest {
                 .productId(createdProductId)
                 .orderId(createdOrderId)
                 .orderedQuantity(1)
-                .createdAt(Instant.now())
-                .updatedAt(Instant.now())
                 .build();
 
         HttpEntity<OrderItemDto> orderItemRequest = new HttpEntity<>(orderItem, headers);
@@ -283,8 +266,6 @@ class E2EUserJourneyTest {
                 .orderId(createdOrderId)
                 .isPayed(true)
                 .paymentStatus(PaymentStatus.COMPLETED)
-                .createdAt(Instant.now())
-                .updatedAt(Instant.now())
                 .build();
 
         HttpEntity<PaymentDto> paymentRequest = new HttpEntity<>(payment, headers);
@@ -322,8 +303,6 @@ class E2EUserJourneyTest {
                 .userId(createdUserId)
                 .productId(createdProductId)
                 .likeDate(likeDate)
-                .createdAt(likeDate.minusDays(1).toInstant(java.time.ZoneOffset.UTC))
-                .updatedAt(likeDate.toInstant(java.time.ZoneOffset.UTC))
                 .build();
 
         // ACT 1 - Add product to favorites
@@ -345,7 +324,8 @@ class E2EUserJourneyTest {
                 likeDate.format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"));
 
         // ACT 2 - Retrieve user's favorites
-        ResponseEntity<DtoCollectionResponse<FavouriteDto>> favouritesResponse = restTemplate.exchange(
+        @SuppressWarnings("rawtypes")
+        ResponseEntity<DtoCollectionResponse> favouritesResponse = restTemplate.exchange(
                 baseUrl + "/api/favourites",
                 HttpMethod.GET,
                 new HttpEntity<>(headers),
@@ -410,7 +390,8 @@ class E2EUserJourneyTest {
         assertEquals(createdOrderId, orderResponse.getBody().getOrderId());
 
         // ACT 4 - Check payment status
-        ResponseEntity<DtoCollectionResponse<PaymentDto>> paymentsResponse = restTemplate.exchange(
+        @SuppressWarnings("rawtypes")
+        ResponseEntity<DtoCollectionResponse> paymentsResponse = restTemplate.exchange(
                 baseUrl + "/api/payments",
                 HttpMethod.GET,
                 new HttpEntity<>(new HttpHeaders()),
@@ -422,7 +403,8 @@ class E2EUserJourneyTest {
         assertNotNull(paymentsResponse.getBody());
 
         // ACT 5 - Verify shipping items
-        ResponseEntity<DtoCollectionResponse<OrderItemDto>> orderItemsResponse = restTemplate.exchange(
+        @SuppressWarnings("rawtypes")
+        ResponseEntity<DtoCollectionResponse> orderItemsResponse = restTemplate.exchange(
                 baseUrl + "/api/order-items",
                 HttpMethod.GET,
                 new HttpEntity<>(new HttpHeaders()),

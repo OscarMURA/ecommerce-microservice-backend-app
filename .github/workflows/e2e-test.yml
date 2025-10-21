@@ -30,14 +30,10 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Build all microservices
-        run: |
-          ./mvnw clean compile -DskipTests
-
       - name: Run E2E tests
         run: |
           cd e2e-tests
-          ./mvnw clean test -Dtest=*E2E*Test -q
+          ../mvnw clean test -Dtest=*E2E*Test -q
 
       - name: Upload E2E test results
         if: always()

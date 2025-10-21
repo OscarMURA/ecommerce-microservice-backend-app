@@ -77,49 +77,6 @@
             <artifactId>lombok</artifactId>
             <scope>test</scope>
         </dependency>
-
-        <!-- DTOs from microservices -->
-        <dependency>
-            <groupId>com.selimhorri</groupId>
-            <artifactId>user-service</artifactId>
-            <version>0.1.0</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>com.selimhorri</groupId>
-            <artifactId>product-service</artifactId>
-            <version>0.1.0</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>com.selimhorri</groupId>
-            <artifactId>order-service</artifactId>
-            <version>0.1.0</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>com.selimhorri</groupId>
-            <artifactId>payment-service</artifactId>
-            <version>0.1.0</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>com.selimhorri</groupId>
-            <artifactId>favourite-service</artifactId>
-            <version>0.1.0</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>com.selimhorri</groupId>
-            <artifactId>shipping-service</artifactId>
-            <version>0.1.0</version>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 
     <build>
