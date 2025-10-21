@@ -6,11 +6,13 @@ on:
       - dev
       - develop
       - 'feat/**'
+      - 'test/**'
   pull_request:
     branches:
       - dev
       - develop
       - 'feat/**'
+      - 'test/**'
 
 jobs:
   test-matrix:
