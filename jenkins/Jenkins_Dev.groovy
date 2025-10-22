@@ -9,6 +9,7 @@ pipeline {
     string(name: 'VM_IMAGE', defaultValue: 'ubuntu-22-04-x64', description: 'Imagen del droplet (usado si hay que crearlo)')
     string(name: 'JENKINS_CREATE_VM_JOB', defaultValue: 'Jenkins_Create_VM', description: 'Nombre del pipeline que aprovisiona la VM en DigitalOcean')
     string(name: 'VM_JOB_BRANCH_HINTS', defaultValue: 'main,master,infra/main,infra/master', description: 'Sufijos (coma separada) para intentar en jobs multibranch si la VM no existe')
+    string(name: 'VM_JOB_EXTRA_PATHS', defaultValue: '', description: 'Rutas completas adicionales (coma separada) a intentar antes de los sufijos')
     string(name: 'REPO_URL', defaultValue: 'https://github.com/OscarMURA/ecommerce-microservice-backend-app.git', description: 'Repositorio a clonar en la VM')
     string(name: 'APP_BRANCH', defaultValue: '', description: 'Branch del repo a usar (vacío = rama actual del pipeline)')
   }
@@ -76,7 +77,12 @@ curl -sS -H "Authorization: Bearer $DO_TOKEN" "https://api.digitalocean.com/v2/d
                 if (env.PIPELINE_BRANCH && !hints.contains(env.PIPELINE_BRANCH)) {
                   hints << env.PIPELINE_BRANCH
                 }
+                def extra = (params.VM_JOB_EXTRA_PATHS ?: '')
+                  .split(',')
+                  .collect { it.trim() }
+                  .findAll { it }
                 def jobCandidates = []
+                jobCandidates.addAll(extra)
                 if (baseJob) {
                   jobCandidates << baseJob
                   if (!baseJob.contains('/')) {

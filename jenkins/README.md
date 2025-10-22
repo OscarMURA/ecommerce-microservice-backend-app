@@ -35,6 +35,7 @@ Pipeline pensado para un Job de Jenkins que:
 | `VM_IMAGE` | Imagen base | `ubuntu-22-04-x64` |
 | `JENKINS_CREATE_VM_JOB` | Nombre base del job que crea la VM (para multibranch deja solo el job y usa `VM_JOB_BRANCH_HINTS`) | `Jenkins_Create_VM` |
 | `VM_JOB_BRANCH_HINTS` | Sufijos (comma separated) que se probarán si el job es multibranch | `main,master,infra/main,infra/master` |
+| `VM_JOB_EXTRA_PATHS` | Rutas completas adicionales a intentar antes de los sufijos (separadas por comas) | `` |
 | `REPO_URL` | URL del repositorio Git a sincronizar | `https://github.com/OscarMURA/ecommerce-microservice-backend-app.git` |
 | `APP_BRANCH` | Rama a desplegar y probar (`""` usa la rama del pipeline) | `""` |
 
