@@ -135,7 +135,8 @@ exit 1
             sh(label: 'Sincronizar repositorio', script: '''
 set -e
 export SSHPASS="$VM_PASSWORD"
-sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenkins@"$TARGET_IP" bash <<EOF
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$TARGET_IP" "REMOTE_BASE='$REMOTE_BASE' REMOTE_DIR='$REMOTE_DIR' REPO_URL='$REPO_URL' APP_BRANCH='$APP_BRANCH' bash -s" <<'EOF'
 set -euo pipefail
 mkdir -p "$REMOTE_BASE"
 cd "$REMOTE_BASE"
@@ -173,7 +174,8 @@ EOF
             sh(label: 'Pruebas unitarias', script: '''
 set -e
 export SSHPASS="$VM_PASSWORD"
-sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenkins@"$TARGET_IP" bash <<EOF
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$TARGET_IP" "REMOTE_DIR='$REMOTE_DIR' UNIT_SERVICES='$UNIT_SERVICES' bash -s" <<'EOF'
 set -euo pipefail
 cd "$REMOTE_DIR"
 for svc in $UNIT_SERVICES; do
@@ -198,7 +200,8 @@ EOF
             sh(label: 'Pruebas de integración', script: '''
 set -e
 export SSHPASS="$VM_PASSWORD"
-sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenkins@"$TARGET_IP" bash <<EOF
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$TARGET_IP" "REMOTE_DIR='$REMOTE_DIR' UNIT_SERVICES='$UNIT_SERVICES' bash -s" <<'EOF'
 set -euo pipefail
 cd "$REMOTE_DIR"
 for svc in $UNIT_SERVICES; do
@@ -222,7 +225,8 @@ EOF
             sh(label: 'Pruebas E2E', script: '''
 set -e
 export SSHPASS="$VM_PASSWORD"
-sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenkins@"$TARGET_IP" bash <<EOF
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$TARGET_IP" "REMOTE_DIR='$REMOTE_DIR' bash -s" <<'EOF'
 set -euo pipefail
 cd "$REMOTE_DIR"
 echo "➡️ Ejecutando pruebas E2E"
@@ -244,7 +248,8 @@ EOF
             sh(label: 'Empaquetar reportes', script: '''
 set -e
 export SSHPASS="$VM_PASSWORD"
-sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenkins@"$TARGET_IP" bash <<EOF
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$TARGET_IP" "REMOTE_DIR='$REMOTE_DIR' bash -s" <<'EOF'
 set -euo pipefail
 cd "$REMOTE_DIR"
 tar -czf /tmp/test-reports.tar.gz \

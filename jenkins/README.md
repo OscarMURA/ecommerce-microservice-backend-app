@@ -20,6 +20,7 @@ Pipeline pensado para un Job de Jenkins que:
 - Jenkins 2.401+ (Pipeline + Script Security)
 - Plugins: Pipeline, Credentials, Workspace Cleanup, SSH Pipeline Steps (opcional si prefieres `sshCommand`; el pipeline usa `sshpass` por shell).
 - Dependencias en el agente Jenkins: `curl`, `jq`, `sshpass`.
+- La VM creada por `Jenkins_Create_VM` instala Docker y OpenJDK 17 automáticamente mediante cloud-init.
 - Credenciales:
   - `digitalocean-token`: Secret Text con token de DigitalOcean (mismo que usa `Jenkins_Create_VM`).
   - `integration-vm-password`: Secret Text con la contraseña del usuario `jenkins` de la VM.
@@ -34,7 +35,7 @@ Pipeline pensado para un Job de Jenkins que:
 | `VM_IMAGE` | Imagen base | `ubuntu-22-04-x64` |
 | `JENKINS_CREATE_VM_JOB` | Nombre del job que crea la VM | `Jenkins_Create_VM` |
 | `REPO_URL` | URL del repositorio Git a sincronizar | `https://github.com/OscarMURA/ecommerce-microservice-backend-app.git` |
-| `APP_BRANCH` | Rama a desplegar y probar | `main` |
+| `APP_BRANCH` | Rama a desplegar y probar (`""` usa la rama del pipeline) | `""` |
 
 ### Salida
 
