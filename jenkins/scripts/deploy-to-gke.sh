@@ -1,0 +1,313 @@
+#!/usr/bin/env bash
+# Deploy selected microservices to a GKE cluster and report their health.
+
+set -euo pipefail
+
+YELLOW="\033[1;33m"
+GREEN="\033[0;32m"
+BLUE="\033[0;34m"
+RED="\033[0;31m"
+NC="\033[0m"
+
+INFO_TAG="[INFO]"
+WARN_TAG="[WARN]"
+OK_TAG="[OK]"
+ERR_TAG="[ERROR]"
+
+log_info() {
+  echo -e "${BLUE}${INFO_TAG}${NC} $*"
+}
+
+log_warn() {
+  echo -e "${YELLOW}${WARN_TAG}${NC} $*"
+}
+
+log_success() {
+  echo -e "${GREEN}${OK_TAG}${NC} $*"
+}
+
+log_error() {
+  echo -e "${RED}${ERR_TAG}${NC} $*"
+}
+
+require_env() {
+  local name="$1"
+  if [[ -z "${!name:-}" ]]; then
+    log_error "La variable de entorno ${name} es requerida."
+    exit 1
+  fi
+}
+
+require_cmd() {
+  local binary="$1"
+  if ! command -v "${binary}" >/dev/null 2>&1; then
+    log_error "El comando '${binary}' no está disponible en el agente Jenkins."
+    exit 1
+  fi
+}
+
+# Required environment variables supplied by Jenkins stage.
+require_env "GCP_PROJECT_ID"
+require_env "GKE_CLUSTER_NAME"
+require_env "GKE_CLUSTER_LOCATION"
+require_env "K8S_NAMESPACE"
+require_env "K8S_SERVICE_LIST"
+require_env "K8S_IMAGE_REGISTRY"
+require_env "K8S_IMAGE_TAG"
+require_env "INFRA_REPO_DIR"
+require_env "GOOGLE_APPLICATION_CREDENTIALS"
+
+# Optional overrides.
+K8S_ENVIRONMENT="${K8S_ENVIRONMENT:-dev}"
+K8S_DEFAULT_REPLICAS="${K8S_DEFAULT_REPLICAS:-1}"
+K8S_ROLLOUT_TIMEOUT="${K8S_ROLLOUT_TIMEOUT:-240}"
+
+require_cmd "gcloud"
+require_cmd "kubectl"
+export CLOUDSDK_CORE_DISABLE_PROMPTS=1
+export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+export PATH="/opt/google-cloud-sdk/google-cloud-sdk/bin:${PATH}"
+
+if [[ ! -d "${INFRA_REPO_DIR}" ]]; then
+  log_error "El repositorio de infraestructura no existe en ${INFRA_REPO_DIR}"
+  exit 1
+fi
+
+log_info "Autenticando con Google Cloud..."
+gcloud auth activate-service-account --key-file "${GOOGLE_APPLICATION_CREDENTIALS}" >/dev/null 2>&1 || {
+  log_error "No se pudo autenticar la service account de GCP."
+  exit 1
+}
+gcloud config set project "${GCP_PROJECT_ID}" >/dev/null
+
+log_info "Obteniendo credenciales del cluster ${GKE_CLUSTER_NAME} (${GKE_CLUSTER_LOCATION})..."
+if ! gcloud container clusters get-credentials "${GKE_CLUSTER_NAME}" --zone "${GKE_CLUSTER_LOCATION}" --project "${GCP_PROJECT_ID}" >/dev/null 2>&1; then
+  log_error "No fue posible obtener credenciales para el cluster."
+  exit 1
+fi
+log_success "Credenciales configuradas."
+
+declare -A SERVICE_PORTS=(
+  [cloud-config]=9296
+  [service-discovery]=8761
+  [api-gateway]=8080
+  [proxy-client]=8900
+  [user-service]=8700
+  [product-service]=8500
+  [favourite-service]=8800
+  [order-service]=8300
+  [shipping-service]=8600
+  [payment-service]=8400
+)
+
+declare -A SERVICE_TYPES=(
+  [api-gateway]=LoadBalancer
+)
+
+declare -A SERVICE_HEALTH_PATH=(
+  [service-discovery]="/actuator/health"
+  [cloud-config]="/actuator/health"
+)
+
+declare -A SERVICE_REPLICAS=(
+  [api-gateway]=2
+)
+
+readarray -t RAW_SERVICES < <(printf '%s\n' "${K8S_SERVICE_LIST}" | tr ',;' '\n' | tr ' ' '\n')
+
+SERVICES=()
+declare -A SEEN
+for svc in "${RAW_SERVICES[@]}"; do
+  svc="$(echo "${svc}" | tr '[:upper:]' '[:lower:]' | xargs)"
+  [[ -z "${svc}" ]] && continue
+  if [[ -n "${SERVICE_PORTS[${svc}]+_}" && -z "${SEEN[${svc}]:-}" ]]; then
+    SERVICES+=("${svc}")
+    SEEN["${svc}"]=1
+  fi
+done
+
+for dep in cloud-config service-discovery; do
+  if [[ -z "${SEEN[${dep}]:-}" ]]; then
+    log_warn "Agregando servicio dependiente requerido '${dep}'."
+    SERVICES=("${dep}" "${SERVICES[@]}")
+    SEEN["${dep}"]=1
+  fi
+done
+
+if [[ "${#SERVICES[@]}" -eq 0 ]]; then
+  log_error "No se proporcionaron servicios válidos para desplegar."
+  exit 1
+fi
+
+log_info "Servicios a desplegar: ${SERVICES[*]}"
+
+BASE_MANIFEST_DIR="${INFRA_REPO_DIR}/kubernetes/manifests"
+if [[ -d "${BASE_MANIFEST_DIR}" ]]; then
+  for base in namespace.yaml configmap.yaml secret.yaml; do
+    if [[ -f "${BASE_MANIFEST_DIR}/${base}" ]]; then
+      log_info "Aplicando manifiesto base ${base}..."
+      kubectl apply -f "${BASE_MANIFEST_DIR}/${base}"
+    fi
+  done
+else
+  log_warn "No se encontró ${BASE_MANIFEST_DIR}; se continuará sin manifiestos base."
+fi
+
+kubectl get namespace "${K8S_NAMESPACE}" >/dev/null 2>&1 || {
+  log_info "Creando namespace ${K8S_NAMESPACE}..."
+  kubectl create namespace "${K8S_NAMESPACE}"
+}
+
+kubectl --namespace "${K8S_NAMESPACE}" patch configmap ecommerce-config --type merge \
+  --patch "{\"data\":{\"SPRING_PROFILES_ACTIVE\":\"${K8S_ENVIRONMENT}\"}}" >/dev/null 2>&1 || true
+
+RENDER_DIR="$(mktemp -d)"
+log_info "Manifiestos renderizados en ${RENDER_DIR}"
+
+render_manifest() {
+  local svc="$1"
+  local port="${SERVICE_PORTS[${svc}]}"
+  local service_type="${SERVICE_TYPES[${svc}]:-ClusterIP}"
+  local health_path="${SERVICE_HEALTH_PATH[${svc}]:-/actuator/health}"
+  local replicas="${SERVICE_REPLICAS[${svc}]:-${K8S_DEFAULT_REPLICAS}}"
+  local manifest="${RENDER_DIR}/${svc}.yaml"
+
+  cat > "${manifest}" <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${svc}
+  namespace: ${K8S_NAMESPACE}
+  labels:
+    app: ${svc}
+    environment: ${K8S_ENVIRONMENT}
+    app.kubernetes.io/name: ${svc}
+    app.kubernetes.io/part-of: ecommerce-platform
+    app.kubernetes.io/managed-by: jenkins
+    app.kubernetes.io/version: ${K8S_IMAGE_TAG}
+    app.kubernetes.io/instance: ${svc}-${K8S_ENVIRONMENT}
+  annotations:
+    jenkins.io/job: "${JOB_NAME:-unknown}"
+    jenkins.io/build-number: "${BUILD_NUMBER:-0}"
+    jenkins.io/git-commit: "${GIT_COMMIT:-unknown}"
+spec:
+  replicas: ${replicas}
+  selector:
+    matchLabels:
+      app: ${svc}
+  template:
+    metadata:
+      labels:
+        app: ${svc}
+        environment: ${K8S_ENVIRONMENT}
+        app.kubernetes.io/name: ${svc}
+        app.kubernetes.io/instance: ${svc}-${K8S_ENVIRONMENT}
+    spec:
+      imagePullSecrets:
+        - name: docker-registry-secret
+      containers:
+        - name: ${svc}
+          image: ${K8S_IMAGE_REGISTRY}/${svc}:${K8S_IMAGE_TAG}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: ${port}
+          env:
+            - name: SERVER_PORT
+              value: "${port}"
+          envFrom:
+            - configMapRef:
+                name: ecommerce-config
+            - secretRef:
+                name: ecommerce-secrets
+          readinessProbe:
+            httpGet:
+              path: ${health_path}
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: ${health_path}
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${svc}
+  namespace: ${K8S_NAMESPACE}
+  labels:
+    app: ${svc}
+    environment: ${K8S_ENVIRONMENT}
+spec:
+  selector:
+    app: ${svc}
+  type: ${service_type}
+  ports:
+    - name: http
+      port: ${port}
+      targetPort: http
+EOF
+}
+
+LB_SERVICES=()
+
+for svc in "${SERVICES[@]}"; do
+  if [[ -z "${SERVICE_PORTS[${svc}]+_}" ]]; then
+    log_error "Servicio '${svc}' no está soportado por el pipeline."
+    exit 1
+  fi
+  render_manifest "${svc}"
+  log_info "Aplicando ${svc}..."
+  kubectl --namespace "${K8S_NAMESPACE}" apply -f "${RENDER_DIR}/${svc}.yaml"
+  if [[ "${SERVICE_TYPES[${svc}]:-ClusterIP}" == "LoadBalancer" ]]; then
+    LB_SERVICES+=("${svc}")
+  fi
+done
+
+for svc in "${SERVICES[@]}"; do
+  log_info "Esperando rollout de ${svc}..."
+  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="${K8S_ROLLOUT_TIMEOUT}s"; then
+    log_error "El despliegue de ${svc} no alcanzó el estado Ready dentro del tiempo esperado."
+    kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="${svc}"
+    exit 1
+  fi
+  log_success "${svc} desplegado correctamente."
+done
+
+for svc in "${LB_SERVICES[@]}"; do
+  log_info "Esperando IP externa para ${svc}..."
+  tries=0
+  max_tries=30
+  external_ip=""
+  while [[ ${tries} -lt ${max_tries} ]]; do
+    external_ip="$(kubectl --namespace "${K8S_NAMESPACE}" get svc "${svc}" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+    if [[ -n "${external_ip}" ]]; then
+      log_success "${svc} disponible en ${external_ip}"
+      break
+    fi
+    tries=$((tries + 1))
+    sleep 5
+  done
+  if [[ -z "${external_ip}" ]]; then
+    log_warn "No se obtuvo IP externa para ${svc} tras ${max_tries} intentos."
+  fi
+done
+
+log_info "Resumen de despliegue en namespace ${K8S_NAMESPACE}:"
+kubectl --namespace "${K8S_NAMESPACE}" get deployments
+kubectl --namespace "${K8S_NAMESPACE}" get services
+kubectl --namespace "${K8S_NAMESPACE}" get pods -o wide
+
+log_success "Despliegue completado."

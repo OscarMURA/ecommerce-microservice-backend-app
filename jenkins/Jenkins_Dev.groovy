@@ -12,6 +12,16 @@ pipeline {
     string(name: 'VM_JOB_EXTRA_PATHS', defaultValue: '', description: 'Rutas completas adicionales (coma separada) a intentar antes de los sufijos')
     string(name: 'REPO_URL', defaultValue: 'https://github.com/OscarMURA/ecommerce-microservice-backend-app.git', description: 'Repositorio a clonar en la VM')
     string(name: 'APP_BRANCH', defaultValue: '', description: 'Branch del repo a usar (vacío = rama actual del pipeline)')
+    booleanParam(name: 'DEPLOY_TO_K8S', defaultValue: false, description: 'Desplegar servicios en Kubernetes al finalizar las pruebas')
+    choice(name: 'K8S_ENVIRONMENT', choices: ['dev', 'staging', 'prod'], description: 'Etiqueta de ambiente para los recursos de Kubernetes')
+    string(name: 'K8S_NAMESPACE', defaultValue: 'ecommerce', description: 'Namespace de Kubernetes donde se desplegarán los servicios')
+    string(name: 'K8S_SERVICES', defaultValue: 'cloud-config service-discovery api-gateway proxy-client user-service product-service favourite-service order-service shipping-service payment-service', description: 'Servicios a desplegar (separados por espacio o coma)')
+    string(name: 'GKE_CLUSTER_NAME', defaultValue: 'ecommerce-dev-gke-v2', description: 'Nombre del cluster GKE')
+    string(name: 'GKE_LOCATION', defaultValue: 'us-central1-a', description: 'Zona o región del cluster GKE')
+    string(name: 'K8S_IMAGE_REGISTRY', defaultValue: 'gcr.io/devops-activity', description: 'Registro de contenedores (p. ej. gcr.io/proyecto)')
+    string(name: 'K8S_IMAGE_TAG', defaultValue: '', description: 'Tag de las imágenes a desplegar (vacío usa el commit actual)')
+    string(name: 'INFRA_REPO_URL', defaultValue: 'https://github.com/OscarMURA/infra-ecommerce-microservice-backend-app.git', description: 'Repositorio con manifiestos de infraestructura')
+    string(name: 'INFRA_REPO_BRANCH', defaultValue: 'main', description: 'Rama del repositorio de infraestructura a usar')
   }
 
   environment {
@@ -469,6 +479,86 @@ sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenkins@"$TARGET_IP" "rm -f /tmp/test-reports.tar.gz" || true
 ''')
             archiveArtifacts artifacts: 'reports/test-reports.tar.gz', fingerprint: true, allowEmptyArchive: true
+          }
+        }
+      }
+    }
+
+    stage('Deploy to Kubernetes') {
+      when {
+        expression { return params.DEPLOY_TO_K8S?.toString()?.toBoolean() }
+      }
+      steps {
+        withCredentials([
+          string(credentialsId: 'gcp-project-id', variable: 'GCP_PROJECT_ID'),
+          file(credentialsId: 'gcp-service-account', variable: 'GOOGLE_APPLICATION_CREDENTIALS')
+        ]) {
+          script {
+            def rawServices = (params.K8S_SERVICES ?: '')
+              .split(/[,\s]+/)
+              .collect { it?.trim()?.toLowerCase() }
+              .findAll { it }
+            if (!rawServices) {
+              error "No se especificaron servicios válidos en el parámetro K8S_SERVICES."
+            }
+
+            def imageTag = params.K8S_IMAGE_TAG?.trim()
+            if (!imageTag) {
+              imageTag = env.GIT_COMMIT ? env.GIT_COMMIT.take(7) : 'latest'
+              echo "Usando tag de imagen '${imageTag}'."
+            }
+
+            def imageRegistry = params.K8S_IMAGE_REGISTRY?.trim()
+            if (!imageRegistry) {
+              error "El parámetro K8S_IMAGE_REGISTRY no puede ser vacío."
+            }
+
+            def clusterName = params.GKE_CLUSTER_NAME?.trim()
+            def clusterLocation = params.GKE_LOCATION?.trim()
+            if (!clusterName || !clusterLocation) {
+              error "Debe especificar GKE_CLUSTER_NAME y GKE_LOCATION."
+            }
+
+            def infraRepoUrl = params.INFRA_REPO_URL?.trim()
+            if (!infraRepoUrl) {
+              error "El parámetro INFRA_REPO_URL es requerido para clonar los manifiestos."
+            }
+            def infraRepoBranch = params.INFRA_REPO_BRANCH?.trim() ?: 'main'
+
+            def workspaceRoot = pwd()
+            def infraDir = "${workspaceRoot}/infra-k8s-config"
+
+            dir('infra-k8s-config') {
+              deleteDir()
+              git branch: infraRepoBranch, credentialsId: 'github-token', url: infraRepoUrl
+            }
+
+            def serviceList = rawServices.join(' ')
+            echo "Servicios objetivo: ${serviceList}"
+
+            def defaultReplicas = params.K8S_ENVIRONMENT == 'prod' ? '2' : '1'
+            def rolloutTimeout = params.K8S_ENVIRONMENT == 'prod' ? '420' : '240'
+
+            withEnv([
+              "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
+              "GKE_CLUSTER_NAME=${clusterName}",
+              "GKE_CLUSTER_LOCATION=${clusterLocation}",
+              "K8S_NAMESPACE=${params.K8S_NAMESPACE}",
+              "K8S_SERVICE_LIST=${serviceList}",
+              "K8S_IMAGE_REGISTRY=${imageRegistry}",
+              "K8S_IMAGE_TAG=${imageTag}",
+              "INFRA_REPO_DIR=${infraDir}",
+              "K8S_ENVIRONMENT=${params.K8S_ENVIRONMENT}",
+              "K8S_DEFAULT_REPLICAS=${defaultReplicas}",
+              "K8S_ROLLOUT_TIMEOUT=${rolloutTimeout}",
+              "GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}"
+            ]) {
+              sh '''
+set -e
+chmod +x jenkins/scripts/deploy-to-gke.sh
+jenkins/scripts/deploy-to-gke.sh
+'''
+            }
           }
         }
       }
