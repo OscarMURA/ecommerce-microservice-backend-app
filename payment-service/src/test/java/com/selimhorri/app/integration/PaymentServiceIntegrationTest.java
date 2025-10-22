@@ -178,3 +178,4 @@ class PaymentServiceIntegrationTest {
         assertTrue(paymentRepository.existsById(savedPayment2.getPaymentId()));
     }
 }
+

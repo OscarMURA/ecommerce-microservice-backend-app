@@ -439,3 +439,4 @@ class E2EUserJourneyTest {
         System.out.println("E2E Tests completed - Data left for verification");
     }
 }
+

@@ -184,3 +184,4 @@ class ProductServiceIntegrationTest {
         assertEquals(1, categoryRepository.count());
     }
 }
+

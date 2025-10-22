@@ -399,3 +399,4 @@ Usar TestContainers para:
 **Última actualización**: 2025-10-21  
 **Autor**: Oscar Murillo Rodriguez  
 **Versión**: 1.0
+

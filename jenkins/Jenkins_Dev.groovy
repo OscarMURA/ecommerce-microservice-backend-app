@@ -14,7 +14,7 @@ pipeline {
 
   environment {
     REMOTE_BASE = "/opt/ecommerce-app"
-    REMOTE_DIR = "${env.REMOTE_BASE}/backend"
+    REMOTE_DIR = "/opt/ecommerce-app/backend"
     UNIT_SERVICES = "user-service product-service order-service favourite-service shipping-service payment-service"
   }
 
@@ -50,7 +50,7 @@ pipeline {
             def fetchIp = {
               return sh(script: """
                 set -e
-                curl -sS -H "Authorization: Bearer ${DO_TOKEN}" "https://api.digitalocean.com/v2/droplets?per_page=200" \\
+                curl -sS -H "Authorization: Bearer ${env.DO_TOKEN}" "https://api.digitalocean.com/v2/droplets?per_page=200" \\
                   | jq -r --arg NAME "${params.VM_NAME}" '.droplets[] | select(.name==\\$NAME) | .networks.v4[] | select(.type=="public") | .ip_address' \\
                   | head -n1
               """, returnStdout: true).trim()
@@ -86,6 +86,11 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')]) {
           script {
+            def remoteBase = env.REMOTE_BASE
+            def remoteDir = env.REMOTE_DIR
+            def repoUrl = params.REPO_URL
+            def appBranch = params.APP_BRANCH
+
             sh '''
               set -e
               export SSHPASS="${VM_PASSWORD}"
@@ -103,19 +108,19 @@ pipeline {
               export SSHPASS="${VM_PASSWORD}"
               sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenkins@"${DROPLET_IP}" <<'EOF'
 set -euo pipefail
-mkdir -p "${REMOTE_BASE}"
-cd "${REMOTE_BASE}"
+mkdir -p "${remoteBase}"
+cd "${remoteBase}"
 if [ ! -d backend/.git ]; then
   rm -rf backend || true
-  git clone "${REPO_URL}" backend
+  git clone "${repoUrl}" backend
 fi
 cd backend
 git fetch --all
-git checkout "${APP_BRANCH}"
-git reset --hard "origin/${APP_BRANCH}"
+git checkout "${appBranch}"
+git reset --hard "origin/${appBranch}"
 git clean -fd
 chmod +x mvnw || true
-git config --global --add safe.directory "${REMOTE_DIR}" || true
+git config --global --add safe.directory "${remoteDir}" || true
 EOF
             """
           }
@@ -126,18 +131,22 @@ EOF
     stage('Unit Tests') {
       steps {
         withCredentials([string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')]) {
-          sh """
+          script {
+            def remoteDir = env.REMOTE_DIR
+            def unitServices = env.UNIT_SERVICES
+            sh """
             set -e
             export SSHPASS="\${VM_PASSWORD}"
             sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenkins@"${DROPLET_IP}" <<'EOF'
 set -euo pipefail
-cd "${REMOTE_DIR}"
-for svc in ${UNIT_SERVICES}; do
+cd "${remoteDir}"
+for svc in ${unitServices}; do
   echo "➡️ Ejecutando pruebas unitarias para \$svc"
   ./mvnw -B -pl \$svc test -Dtest='*ApplicationTests' -DfailIfNoTests=false
 done
 EOF
-          """
+            """
+          }
         }
       }
     }
@@ -145,18 +154,22 @@ EOF
     stage('Integration Tests') {
       steps {
         withCredentials([string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')]) {
-          sh """
+          script {
+            def remoteDir = env.REMOTE_DIR
+            def unitServices = env.UNIT_SERVICES
+            sh """
             set -e
             export SSHPASS="\${VM_PASSWORD}"
             sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenkins@"${DROPLET_IP}" <<'EOF'
 set -euo pipefail
-cd "${REMOTE_DIR}"
-for svc in ${UNIT_SERVICES}; do
+cd "${remoteDir}"
+for svc in ${unitServices}; do
   echo "➡️ Ejecutando pruebas de integración para \$svc"
   ./mvnw -B -pl \$svc test -Dtest='*IntegrationTest' -DfailIfNoTests=false
 done
 EOF
-          """
+            """
+          }
         }
       }
     }
@@ -164,16 +177,19 @@ EOF
     stage('E2E Tests') {
       steps {
         withCredentials([string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')]) {
-          sh """
+          script {
+            def remoteDir = env.REMOTE_DIR
+            sh """
             set -e
             export SSHPASS="\${VM_PASSWORD}"
             sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenkins@"${DROPLET_IP}" <<'EOF'
 set -euo pipefail
-cd "${REMOTE_DIR}"
+cd "${remoteDir}"
 echo "➡️ Ejecutando pruebas E2E"
 ./mvnw -B -pl e2e-tests test -Dtest='*E2E*Test' -DfailIfNoTests=false
 EOF
-          """
+            """
+          }
         }
       }
     }
@@ -181,12 +197,14 @@ EOF
     stage('Recolectar Reportes') {
       steps {
         withCredentials([string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')]) {
-          sh """
+          script {
+            def remoteDir = env.REMOTE_DIR
+            sh """
             set -e
             export SSHPASS="\${VM_PASSWORD}"
             sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenkins@"${DROPLET_IP}" <<'EOF'
 set -euo pipefail
-cd "${REMOTE_DIR}"
+cd "${remoteDir}"
 tar -czf /tmp/test-reports.tar.gz \\
   user-service/target/surefire-reports \\
   product-service/target/surefire-reports \\
