@@ -9,7 +9,7 @@ pipeline {
     string(name: 'VM_IMAGE', defaultValue: 'ubuntu-22-04-x64', description: 'Imagen del droplet (usado si hay que crearlo)')
     string(name: 'JENKINS_CREATE_VM_JOB', defaultValue: 'Jenkins_Create_VM', description: 'Nombre del pipeline que aprovisiona la VM en DigitalOcean')
     string(name: 'REPO_URL', defaultValue: 'https://github.com/OscarMURA/ecommerce-microservice-backend-app.git', description: 'Repositorio a clonar en la VM')
-    string(name: 'APP_BRANCH', defaultValue: 'main', description: 'Branch del repositorio a usar')
+    string(name: 'APP_BRANCH', defaultValue: '', description: 'Branch del repo a usar (vacío = rama actual del pipeline)')
   }
 
   environment {
@@ -31,6 +31,7 @@ pipeline {
             error "Jenkins_Dev solo se ejecuta en ramas develop o feat/** (rama actual: '${branch}')."
           }
           echo "Branch validada: ${branch}"
+          env.PIPELINE_BRANCH = branch
         }
       }
     }
@@ -93,13 +94,18 @@ curl -sS -H "Authorization: Bearer $DO_TOKEN" "https://api.digitalocean.com/v2/d
     stage('Sync Repository on VM') {
       steps {
         withCredentials([string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')]) {
-          withEnv([
-            "TARGET_IP=${env.DROPLET_IP}",
-            "REMOTE_BASE=${env.REMOTE_BASE}",
-            "REMOTE_DIR=${env.REMOTE_DIR}",
-            "REPO_URL=${params.REPO_URL}",
-            "APP_BRANCH=${params.APP_BRANCH}"
-          ]) {
+          script {
+            def branchToUse = params.APP_BRANCH?.trim()
+            if (!branchToUse) {
+              branchToUse = env.PIPELINE_BRANCH ?: 'develop'
+            }
+            withEnv([
+              "TARGET_IP=${env.DROPLET_IP}",
+              "REMOTE_BASE=${env.REMOTE_BASE}",
+              "REMOTE_DIR=${env.REMOTE_DIR}",
+              "REPO_URL=${params.REPO_URL}",
+              "APP_BRANCH=${branchToUse}"
+            ]) {
             sh(label: 'Esperar VM lista', script: '''
 set -e
 export SSHPASS="$VM_PASSWORD"
@@ -126,14 +132,19 @@ if [ ! -d backend/.git ]; then
   git clone "$REPO_URL" backend
 fi
 cd backend
-git fetch --all
-git checkout "$APP_BRANCH"
-git reset --hard "origin/$APP_BRANCH"
+git fetch origin "$APP_BRANCH" || git fetch origin
+if git rev-parse --verify "origin/$APP_BRANCH" >/dev/null 2>&1; then
+  git checkout -B "$APP_BRANCH" "origin/$APP_BRANCH"
+else
+  git checkout "$APP_BRANCH"
+fi
+git reset --hard "origin/$APP_BRANCH" || true
 git clean -fd
 chmod +x mvnw || true
 git config --global --add safe.directory "$REMOTE_DIR" || true
 EOF
 ''')
+          }
           }
         }
       }
