@@ -8,6 +8,7 @@ pipeline {
     string(name: 'VM_SIZE', defaultValue: 's-1vcpu-2gb', description: 'Tamaño del droplet (usado si hay que crearlo)')
     string(name: 'VM_IMAGE', defaultValue: 'ubuntu-22-04-x64', description: 'Imagen del droplet (usado si hay que crearlo)')
     string(name: 'JENKINS_CREATE_VM_JOB', defaultValue: 'Jenkins_Create_VM', description: 'Nombre del pipeline que aprovisiona la VM en DigitalOcean')
+    string(name: 'VM_JOB_BRANCH_HINTS', defaultValue: 'main,master,infra/main,infra/master', description: 'Sufijos (coma separada) para intentar en jobs multibranch si la VM no existe')
     string(name: 'REPO_URL', defaultValue: 'https://github.com/OscarMURA/ecommerce-microservice-backend-app.git', description: 'Repositorio a clonar en la VM')
     string(name: 'APP_BRANCH', defaultValue: '', description: 'Branch del repo a usar (vacío = rama actual del pipeline)')
   }
@@ -67,16 +68,28 @@ curl -sS -H "Authorization: Bearer $DO_TOKEN" "https://api.digitalocean.com/v2/d
               def currentIp = fetchIp()
               if (!currentIp) {
                 echo "No se encontró la VM ${params.VM_NAME}. Solicitando creación..."
-                def jobCandidates = []
-                if (params.JENKINS_CREATE_VM_JOB?.trim()) {
-                  jobCandidates << params.JENKINS_CREATE_VM_JOB.trim()
+                def baseJob = params.JENKINS_CREATE_VM_JOB?.trim() ?: ''
+                def hints = (params.VM_JOB_BRANCH_HINTS ?: '')
+                  .split(',')
+                  .collect { it.trim() }
+                  .findAll { it }
+                if (env.PIPELINE_BRANCH && !hints.contains(env.PIPELINE_BRANCH)) {
+                  hints << env.PIPELINE_BRANCH
                 }
-                jobCandidates << "${params.JENKINS_CREATE_VM_JOB.trim()}/main"
-                jobCandidates << "${params.JENKINS_CREATE_VM_JOB.trim()}/master"
+                def jobCandidates = []
+                if (baseJob) {
+                  jobCandidates << baseJob
+                  if (!baseJob.contains('/')) {
+                    hints.each { suffix ->
+                      jobCandidates << "${baseJob}/${suffix}"
+                    }
+                  }
+                }
+                jobCandidates = jobCandidates.collect { it.trim() }.findAll { it }.unique()
+
                 def triggered = false
                 def lastError = null
-                for (candidate in jobCandidates.unique()) {
-                  if (!candidate?.trim()) { continue }
+                for (candidate in jobCandidates) {
                   try {
                     echo "Intentando disparar job '${candidate}'..."
                     build job: candidate, wait: true, propagate: true, parameters: [
@@ -96,7 +109,7 @@ curl -sS -H "Authorization: Bearer $DO_TOKEN" "https://api.digitalocean.com/v2/d
                   }
                 }
                 if (!triggered) {
-                  error "No se pudo invocar el pipeline Jenkins_Create_VM. Revisa el parámetro 'JENKINS_CREATE_VM_JOB'. Último error: ${lastError?.message}"
+                  error "No se pudo invocar el pipeline Jenkins_Create_VM. Revisa el parámetro 'JENKINS_CREATE_VM_JOB' o proporciona un sufijo válido en VM_JOB_BRANCH_HINTS. Último error: ${lastError?.message}"
                 }
                 sleep(time: 30, unit: 'SECONDS')
                 currentIp = fetchIp()
