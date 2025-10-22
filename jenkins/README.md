@@ -33,7 +33,7 @@ Pipeline pensado para un Job de Jenkins que:
 | `VM_REGION` | Región de la VM (solo para crearla en caso de ausencia) | `nyc3` |
 | `VM_SIZE` | Plan de DigitalOcean | `s-1vcpu-2gb` |
 | `VM_IMAGE` | Imagen base | `ubuntu-22-04-x64` |
-| `JENKINS_CREATE_VM_JOB` | Nombre del job que crea la VM | `Jenkins_Create_VM` |
+| `JENKINS_CREATE_VM_JOB` | Nombre del job que crea la VM (para multibranch usa `Jenkins_Create_VM/main`) | `Jenkins_Create_VM` |
 | `REPO_URL` | URL del repositorio Git a sincronizar | `https://github.com/OscarMURA/ecommerce-microservice-backend-app.git` |
 | `APP_BRANCH` | Rama a desplegar y probar (`""` usa la rama del pipeline) | `""` |
 

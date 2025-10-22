@@ -67,14 +67,37 @@ curl -sS -H "Authorization: Bearer $DO_TOKEN" "https://api.digitalocean.com/v2/d
               def currentIp = fetchIp()
               if (!currentIp) {
                 echo "No se encontró la VM ${params.VM_NAME}. Solicitando creación..."
-                build job: params.JENKINS_CREATE_VM_JOB, wait: true, propagate: true, parameters: [
-                  string(name: 'ACTION', value: 'create'),
-                  string(name: 'VM_NAME', value: params.VM_NAME),
-                  string(name: 'VM_REGION', value: params.VM_REGION),
-                  string(name: 'VM_SIZE', value: params.VM_SIZE),
-                  string(name: 'VM_IMAGE', value: params.VM_IMAGE),
-                  booleanParam(name: 'ARCHIVE_METADATA', value: true)
-                ]
+                def jobCandidates = []
+                if (params.JENKINS_CREATE_VM_JOB?.trim()) {
+                  jobCandidates << params.JENKINS_CREATE_VM_JOB.trim()
+                }
+                jobCandidates << "${params.JENKINS_CREATE_VM_JOB.trim()}/main"
+                jobCandidates << "${params.JENKINS_CREATE_VM_JOB.trim()}/master"
+                def triggered = false
+                def lastError = null
+                for (candidate in jobCandidates.unique()) {
+                  if (!candidate?.trim()) { continue }
+                  try {
+                    echo "Intentando disparar job '${candidate}'..."
+                    build job: candidate, wait: true, propagate: true, parameters: [
+                      string(name: 'ACTION', value: 'create'),
+                      string(name: 'VM_NAME', value: params.VM_NAME),
+                      string(name: 'VM_REGION', value: params.VM_REGION),
+                      string(name: 'VM_SIZE', value: params.VM_SIZE),
+                      string(name: 'VM_IMAGE', value: params.VM_IMAGE),
+                      booleanParam(name: 'ARCHIVE_METADATA', value: true)
+                    ]
+                    triggered = true
+                    env.JOB_USED_FOR_VM = candidate
+                    break
+                  } catch (Exception ex) {
+                    lastError = ex
+                    echo "No se pudo ejecutar '${candidate}': ${ex.message}"
+                  }
+                }
+                if (!triggered) {
+                  error "No se pudo invocar el pipeline Jenkins_Create_VM. Revisa el parámetro 'JENKINS_CREATE_VM_JOB'. Último error: ${lastError?.message}"
+                }
                 sleep(time: 30, unit: 'SECONDS')
                 currentIp = fetchIp()
               }
