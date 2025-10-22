@@ -99,6 +99,18 @@ curl -sS -H "Authorization: Bearer $DO_TOKEN" "https://api.digitalocean.com/v2/d
             if (!branchToUse) {
               branchToUse = env.PIPELINE_BRANCH ?: 'develop'
             }
+            def branchExistsStatus = sh(
+              script: """
+set -e
+git ls-remote --heads "${params.REPO_URL}" "${branchToUse}" | grep -q "${branchToUse}"
+""",
+              returnStatus: true
+            )
+            if (branchExistsStatus != 0 && params.APP_BRANCH?.trim()) {
+              echo "La rama '${branchToUse}' no existe en remoto. Usando rama del pipeline '${env.PIPELINE_BRANCH ?: 'develop'}'."
+              branchToUse = env.PIPELINE_BRANCH ?: 'develop'
+            }
+            echo "Sincronizando repositorio ${params.REPO_URL} con rama ${branchToUse}"
             withEnv([
               "TARGET_IP=${env.DROPLET_IP}",
               "REMOTE_BASE=${env.REMOTE_BASE}",
