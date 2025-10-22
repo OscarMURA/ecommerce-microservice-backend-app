@@ -50,84 +50,78 @@ pipeline {
     stage('Ensure VM Available') {
       steps {
         withCredentials([string(credentialsId: 'digitalocean-token', variable: 'DO_TOKEN')]) {
-          withEnv([
-            "TARGET_VM=${params.VM_NAME}",
-            "TARGET_REGION=${params.VM_REGION}",
-            "TARGET_SIZE=${params.VM_SIZE}",
-            "TARGET_IMAGE=${params.VM_IMAGE}"
-          ]) {
-            script {
-              def fetchIp = {
-                sh(script: '''
+          script {
+            def fetchIp = {
+              sh(script: """
 set -e
-curl -sS -H "Authorization: Bearer $DO_TOKEN" "https://api.digitalocean.com/v2/droplets?per_page=200" \
-  | jq -r --arg NAME "$TARGET_VM" '.droplets[] | select(.name==$NAME) | .networks.v4[] | select(.type=="public") | .ip_address' \
+curl -sS -H \"Authorization: Bearer ${DO_TOKEN}\" \"https://api.digitalocean.com/v2/droplets?per_page=200\" \
+  | jq -r --arg NAME \"${params.VM_NAME}\" '.droplets[] | select(.name==\$NAME) | .networks.v4[] | select(.type==\"public\") | .ip_address' \
   | head -n1
-''', returnStdout: true).trim()
-              }
-
-              def currentIp = fetchIp()
-              if (!currentIp) {
-                echo "No se encontró la VM ${params.VM_NAME}. Solicitando creación..."
-                def baseJob = params.JENKINS_CREATE_VM_JOB?.trim() ?: ''
-                def hints = (params.VM_JOB_BRANCH_HINTS ?: '')
-                  .split(',')
-                  .collect { it.trim() }
-                  .findAll { it }
-                if (env.PIPELINE_BRANCH && !hints.contains(env.PIPELINE_BRANCH)) {
-                  hints << env.PIPELINE_BRANCH
-                }
-                def extra = (params.VM_JOB_EXTRA_PATHS ?: '')
-                  .split(',')
-                  .collect { it.trim() }
-                  .findAll { it }
-                def jobCandidates = []
-                jobCandidates.addAll(extra)
-                if (baseJob) {
-                  jobCandidates << baseJob
-                  if (!baseJob.contains('/')) {
-                    hints.each { suffix ->
-                      jobCandidates << "${baseJob}/${suffix}"
-                    }
-                  }
-                }
-                jobCandidates = jobCandidates.collect { it.trim() }.findAll { it }.unique()
-
-                def triggered = false
-                def lastError = null
-                for (candidate in jobCandidates) {
-                  try {
-                    echo "Intentando disparar job '${candidate}'..."
-                    build job: candidate, wait: true, propagate: true, parameters: [
-                      string(name: 'ACTION', value: 'create'),
-                      string(name: 'VM_NAME', value: params.VM_NAME),
-                      string(name: 'VM_REGION', value: params.VM_REGION),
-                      string(name: 'VM_SIZE', value: params.VM_SIZE),
-                      string(name: 'VM_IMAGE', value: params.VM_IMAGE),
-                      booleanParam(name: 'ARCHIVE_METADATA', value: true)
-                    ]
-                    triggered = true
-                    env.JOB_USED_FOR_VM = candidate
-                    break
-                  } catch (Exception ex) {
-                    lastError = ex
-                    echo "No se pudo ejecutar '${candidate}': ${ex.message}"
-                  }
-                }
-                if (!triggered) {
-                  error "No se pudo invocar el pipeline Jenkins_Create_VM. Revisa el parámetro 'JENKINS_CREATE_VM_JOB' o proporciona un sufijo válido en VM_JOB_BRANCH_HINTS. Último error: ${lastError?.message}"
-                }
-                sleep(time: 30, unit: 'SECONDS')
-                currentIp = fetchIp()
-              }
-
-              if (!currentIp) {
-                error "No se pudo obtener la IP pública de ${params.VM_NAME} después de intentar crearla."
-              }
-
-              env.DROPLET_IP = currentIp
-              echo "VM disponible en IP ${env.DROPLET_IP}"
+""", returnStdout: true).trim()
             }
+
+            def currentIp = fetchIp()
+            if (!currentIp) {
+              echo "No se encontró la VM ${params.VM_NAME}. Solicitando creación..."
+              def baseJob = params.JENKINS_CREATE_VM_JOB?.trim() ?: ''
+              def hints = (params.VM_JOB_BRANCH_HINTS ?: '')
+                .split(',')
+                .collect { it.trim() }
+                .findAll { it }
+              if (env.PIPELINE_BRANCH && !hints.contains(env.PIPELINE_BRANCH)) {
+                hints << env.PIPELINE_BRANCH
+              }
+              def extra = (params.VM_JOB_EXTRA_PATHS ?: '')
+                .split(',')
+                .collect { it.trim() }
+                .findAll { it }
+              def jobCandidates = []
+              jobCandidates.addAll(extra)
+              if (baseJob) {
+                jobCandidates << baseJob
+                if (!baseJob.contains('/')) {
+                  hints.each { suffix ->
+                    jobCandidates << "${baseJob}/${suffix}"
+                  }
+                }
+              }
+              jobCandidates = jobCandidates.collect { it.trim() }.findAll { it }.unique()
+
+              def triggered = false
+              def lastError = null
+              for (candidate in jobCandidates) {
+                try {
+                  echo "Intentando disparar job '${candidate}'..."
+                  build job: candidate, wait: true, propagate: true, parameters: [
+                    string(name: 'ACTION', value: 'create'),
+                    string(name: 'VM_NAME', value: params.VM_NAME),
+                    string(name: 'VM_REGION', value: params.VM_REGION),
+                    string(name: 'VM_SIZE', value: params.VM_SIZE),
+                    string(name: 'VM_IMAGE', value: params.VM_IMAGE),
+                    booleanParam(name: 'ARCHIVE_METADATA', value: true)
+                  ]
+                  triggered = true
+                  env.JOB_USED_FOR_VM = candidate
+                  break
+                } catch (Exception ex) {
+                  lastError = ex
+                  echo "No se pudo ejecutar '${candidate}': ${ex.message}"
+                }
+              }
+              if (!triggered) {
+                def suggestion = baseJob.contains('/') ? baseJob : "${baseJob}/${hints ? hints[0] : 'main'}"
+                error "No se pudo invocar el pipeline Jenkins_Create_VM. Revisa el parámetro 'JENKINS_CREATE_VM_JOB' o proporciona un sufijo válido (p. ej. '${suggestion}'). Último error: ${lastError?.message}"
+              }
+              sleep(time: 30, unit: 'SECONDS')
+              currentIp = fetchIp()
+            }
+
+            if (!currentIp) {
+              error "No se pudo obtener la IP pública de ${params.VM_NAME} después de intentar crearla."
+            }
+
+            env.DROPLET_IP = currentIp
+            echo "VM disponible en IP ${env.DROPLET_IP}"
           }
         }
       }
@@ -178,9 +172,33 @@ exit 1
 set -e
 export SSHPASS="$VM_PASSWORD"
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  jenkins@"$TARGET_IP" "REMOTE_BASE='$REMOTE_BASE' REMOTE_DIR='$REMOTE_DIR' REPO_URL='$REPO_URL' APP_BRANCH='$APP_BRANCH' bash -s" <<'EOF'
+  jenkins@"$TARGET_IP" "REMOTE_BASE='$REMOTE_BASE' REMOTE_DIR='$REMOTE_DIR' REPO_URL='$REPO_URL' APP_BRANCH='$APP_BRANCH' VM_PASSWORD='$VM_PASSWORD' bash -s" <<'EOF'
 set -euo pipefail
-mkdir -p "$REMOTE_BASE"
+ensure_remote_base() {
+  if mkdir -p "$REMOTE_BASE"; then
+    return 0
+  fi
+
+  echo "mkdir -p $REMOTE_BASE falló sin sudo, reintentando..." >&2
+  if command -v sudo >/dev/null 2>&1; then
+    if sudo -n true 2>/dev/null; then
+      sudo mkdir -p "$REMOTE_BASE"
+      sudo chown -R "$USER":"$USER" "$REMOTE_BASE"
+      return 0
+    fi
+
+    if [ -n "${VM_PASSWORD:-}" ]; then
+      printf '%s\n' "$VM_PASSWORD" | sudo -S mkdir -p "$REMOTE_BASE"
+      printf '%s\n' "$VM_PASSWORD" | sudo -S chown -R "$USER":"$USER" "$REMOTE_BASE"
+      return 0
+    fi
+  fi
+
+  echo "No se pudo crear ${REMOTE_BASE}. Verifica permisos o usa otra ruta." >&2
+  exit 1
+}
+
+ensure_remote_base
 cd "$REMOTE_BASE"
 if [ ! -d backend/.git ]; then
   rm -rf backend || true
