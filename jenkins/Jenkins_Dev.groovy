@@ -238,9 +238,56 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   jenkins@"$TARGET_IP" "REMOTE_DIR='$REMOTE_DIR' UNIT_SERVICES='$UNIT_SERVICES' bash -s" <<'EOF'
 set -euo pipefail
 cd "$REMOTE_DIR"
+summarize_reports() {
+  local module="$1"
+  local report_dir="$module/target/surefire-reports"
+  if [ ! -d "$report_dir" ]; then
+    echo "ℹ️ Sin reportes en ${report_dir}"
+    return
+  fi
+
+  local summary=""
+  if compgen -G "$report_dir"/*.txt >/dev/null 2>&1; then
+    summary=$(grep -h 'Tests run:' "$report_dir"/*.txt 2>/dev/null | tail -n1 || true)
+  fi
+  if [ -z "$summary" ] && compgen -G "$report_dir"/TEST-*.xml >/dev/null 2>&1; then
+    summary=$(REPORT_DIR="$report_dir" python3 <<'PY' 2>/dev/null
+import glob
+import os
+import xml.etree.ElementTree as ET
+
+report_dir = os.environ["REPORT_DIR"]
+total = fails = errors = skipped = 0
+found = False
+
+for path in glob.glob(os.path.join(report_dir, "TEST-*.xml")):
+    try:
+        root = ET.parse(path).getroot()
+    except Exception:
+        continue
+    total += int(root.attrib.get("tests", 0))
+    fails += int(root.attrib.get("failures", 0))
+    errors += int(root.attrib.get("errors", 0))
+    skipped += int(root.attrib.get("skipped", 0))
+    found = True
+
+if found:
+    print(f"Tests run: {total}, Failures: {fails}, Errors: {errors}, Skipped: {skipped}")
+PY
+)
+  fi
+
+  if [ -n "$summary" ]; then
+    echo "📊 ${module} -> ${summary}"
+  else
+    echo "⚠️ No se pudo extraer resumen para ${module}"
+  fi
+}
+
 for svc in $UNIT_SERVICES; do
   echo "➡️ Ejecutando pruebas unitarias para $svc"
   ./mvnw -B -pl "$svc" test -Dtest='*ApplicationTests' -DfailIfNoTests=false
+  summarize_reports "$svc"
 done
 EOF
 ''')
@@ -264,9 +311,56 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   jenkins@"$TARGET_IP" "REMOTE_DIR='$REMOTE_DIR' UNIT_SERVICES='$UNIT_SERVICES' bash -s" <<'EOF'
 set -euo pipefail
 cd "$REMOTE_DIR"
+summarize_reports() {
+  local module="$1"
+  local report_dir="$module/target/surefire-reports"
+  if [ ! -d "$report_dir" ]; then
+    echo "ℹ️ Sin reportes en ${report_dir}"
+    return
+  fi
+
+  local summary=""
+  if compgen -G "$report_dir"/*.txt >/dev/null 2>&1; then
+    summary=$(grep -h 'Tests run:' "$report_dir"/*.txt 2>/dev/null | tail -n1 || true)
+  fi
+  if [ -z "$summary" ] && compgen -G "$report_dir"/TEST-*.xml >/dev/null 2>&1; then
+    summary=$(REPORT_DIR="$report_dir" python3 <<'PY' 2>/dev/null
+import glob
+import os
+import xml.etree.ElementTree as ET
+
+report_dir = os.environ["REPORT_DIR"]
+total = fails = errors = skipped = 0
+found = False
+
+for path in glob.glob(os.path.join(report_dir, "TEST-*.xml")):
+    try:
+        root = ET.parse(path).getroot()
+    except Exception:
+        continue
+    total += int(root.attrib.get("tests", 0))
+    fails += int(root.attrib.get("failures", 0))
+    errors += int(root.attrib.get("errors", 0))
+    skipped += int(root.attrib.get("skipped", 0))
+    found = True
+
+if found:
+    print(f"Tests run: {total}, Failures: {fails}, Errors: {errors}, Skipped: {skipped}")
+PY
+)
+  fi
+
+  if [ -n "$summary" ]; then
+    echo "📊 ${module} -> ${summary}"
+  else
+    echo "⚠️ No se pudo extraer resumen para ${module}"
+  fi
+}
+
 for svc in $UNIT_SERVICES; do
   echo "➡️ Ejecutando pruebas de integración para $svc"
   ./mvnw -B -pl "$svc" test -Dtest='*IntegrationTest' -DfailIfNoTests=false
+  summarize_reports "$svc"
 done
 EOF
 ''')
@@ -289,8 +383,55 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   jenkins@"$TARGET_IP" "REMOTE_DIR='$REMOTE_DIR' bash -s" <<'EOF'
 set -euo pipefail
 cd "$REMOTE_DIR"
+summarize_reports() {
+  local module="$1"
+  local report_dir="$module/target/surefire-reports"
+  if [ ! -d "$report_dir" ]; then
+    echo "ℹ️ Sin reportes en ${report_dir}"
+    return
+  fi
+
+  local summary=""
+  if compgen -G "$report_dir"/*.txt >/dev/null 2>&1; then
+    summary=$(grep -h 'Tests run:' "$report_dir"/*.txt 2>/dev/null | tail -n1 || true)
+  fi
+  if [ -z "$summary" ] && compgen -G "$report_dir"/TEST-*.xml >/dev/null 2>&1; then
+    summary=$(REPORT_DIR="$report_dir" python3 <<'PY' 2>/dev/null
+import glob
+import os
+import xml.etree.ElementTree as ET
+
+report_dir = os.environ["REPORT_DIR"]
+total = fails = errors = skipped = 0
+found = False
+
+for path in glob.glob(os.path.join(report_dir, "TEST-*.xml")):
+    try:
+        root = ET.parse(path).getroot()
+    except Exception:
+        continue
+    total += int(root.attrib.get("tests", 0))
+    fails += int(root.attrib.get("failures", 0))
+    errors += int(root.attrib.get("errors", 0))
+    skipped += int(root.attrib.get("skipped", 0))
+    found = True
+
+if found:
+    print(f"Tests run: {total}, Failures: {fails}, Errors: {errors}, Skipped: {skipped}")
+PY
+)
+  fi
+
+  if [ -n "$summary" ]; then
+    echo "📊 ${module} -> ${summary}"
+  else
+    echo "⚠️ No se pudo extraer resumen para ${module}"
+  fi
+}
+
 echo "➡️ Ejecutando pruebas E2E"
 ./mvnw -B -pl e2e-tests test -Dtest='*E2E*Test' -DfailIfNoTests=false
+summarize_reports "e2e-tests"
 EOF
 ''')
           }
