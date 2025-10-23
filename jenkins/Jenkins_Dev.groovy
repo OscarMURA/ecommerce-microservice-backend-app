@@ -529,15 +529,17 @@ set -e
 export SSHPASS="$VM_PASSWORD"
 
 echo "🔐 Copiando credenciales de GCP a la VM..."
+CREDS_TEMP_FILE="/tmp/gcp-creds-$RANDOM.json"
 sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  "${GOOGLE_APPLICATION_CREDENTIALS}" jenkins@"$TARGET_IP":~/gcp-credentials.json
+  "${GOOGLE_APPLICATION_CREDENTIALS}" jenkins@"$TARGET_IP":"$CREDS_TEMP_FILE"
 
 echo "🔨 Construyendo y subiendo imágenes Docker..."
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  jenkins@"$TARGET_IP" "GCP_PROJECT_ID='$GCP_PROJECT_ID' IMAGE_REGISTRY='$IMAGE_REGISTRY' IMAGE_TAG='$IMAGE_TAG' REMOTE_DIR='$REMOTE_DIR' SERVICE_LIST='$SERVICE_LIST' bash -s" <<'EOFBUILD'
+  jenkins@"$TARGET_IP" "GCP_PROJECT_ID='$GCP_PROJECT_ID' IMAGE_REGISTRY='$IMAGE_REGISTRY' IMAGE_TAG='$IMAGE_TAG' REMOTE_DIR='$REMOTE_DIR' SERVICE_LIST='$SERVICE_LIST' CREDS_TEMP_FILE='$CREDS_TEMP_FILE' bash -s" <<'EOFBUILD'
 set -euo pipefail
 
-GCP_CREDS_FILE="$HOME/gcp-credentials.json"
+# Usar la ruta temporal que pasamos
+GCP_CREDS_FILE="$CREDS_TEMP_FILE"
 
 echo "🔐 Autenticando con Google Cloud..."
 gcloud auth activate-service-account --key-file="$GCP_CREDS_FILE"
