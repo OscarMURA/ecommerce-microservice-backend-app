@@ -62,11 +62,12 @@ K8S_ENVIRONMENT="${K8S_ENVIRONMENT:-dev}"
 K8S_DEFAULT_REPLICAS="${K8S_DEFAULT_REPLICAS:-1}"
 K8S_ROLLOUT_TIMEOUT="${K8S_ROLLOUT_TIMEOUT:-240}"
 
-require_cmd "gcloud"
-require_cmd "kubectl"
 export CLOUDSDK_CORE_DISABLE_PROMPTS=1
 export USE_GKE_GCLOUD_AUTH_PLUGIN=True
 export PATH="/opt/google-cloud-sdk/google-cloud-sdk/bin:${PATH}"
+
+require_cmd "gcloud"
+require_cmd "kubectl"
 
 if [[ ! -d "${INFRA_REPO_DIR}" ]]; then
   log_error "El repositorio de infraestructura no existe en ${INFRA_REPO_DIR}"
