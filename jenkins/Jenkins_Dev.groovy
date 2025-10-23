@@ -484,6 +484,95 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenki
       }
     }
 
+    stage('Build and Push Docker Images') {
+      when {
+        expression { return params.DEPLOY_TO_K8S?.toString()?.toBoolean() }
+      }
+      steps {
+        withCredentials([
+          string(credentialsId: 'gcp-project-id', variable: 'GCP_PROJECT_ID'),
+          file(credentialsId: 'gcp-service-account', variable: 'GOOGLE_APPLICATION_CREDENTIALS'),
+          string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')
+        ]) {
+          script {
+            def imageTag = params.K8S_IMAGE_TAG?.trim()
+            if (!imageTag) {
+              imageTag = env.GIT_COMMIT ? env.GIT_COMMIT.take(7) : 'latest'
+            }
+            
+            def imageRegistry = params.K8S_IMAGE_REGISTRY?.trim()
+            if (!imageRegistry) {
+              error "El parámetro K8S_IMAGE_REGISTRY no puede ser vacío."
+            }
+
+            def rawServices = (params.K8S_SERVICES ?: '')
+              .split(/[,\s]+/)
+              .collect { it?.trim()?.toLowerCase() }
+              .findAll { it }
+            
+            def serviceList = rawServices.join(' ')
+            
+            echo "🔨 Construyendo imágenes Docker para: ${serviceList}"
+            echo "📦 Registro: ${imageRegistry}"
+            echo "🏷️  Tag: ${imageTag}"
+
+            withEnv([
+              "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
+              "IMAGE_REGISTRY=${imageRegistry}",
+              "IMAGE_TAG=${imageTag}",
+              "TARGET_IP=${env.DROPLET_IP}",
+              "REMOTE_DIR=${env.REMOTE_DIR}",
+              "SERVICE_LIST=${serviceList}"
+            ]) {
+              sh '''
+set -e
+export SSHPASS="$VM_PASSWORD"
+
+echo "🔐 Copiando credenciales de GCP a la VM..."
+sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  "${GOOGLE_APPLICATION_CREDENTIALS}" jenkins@"$TARGET_IP":/tmp/gcp-credentials.json
+
+echo "🔨 Construyendo y subiendo imágenes Docker..."
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$TARGET_IP" "GCP_PROJECT_ID='$GCP_PROJECT_ID' IMAGE_REGISTRY='$IMAGE_REGISTRY' IMAGE_TAG='$IMAGE_TAG' REMOTE_DIR='$REMOTE_DIR' SERVICE_LIST='$SERVICE_LIST' bash -s" <<'EOFBUILD'
+set -euo pipefail
+
+echo "🔐 Autenticando con Google Cloud..."
+gcloud auth activate-service-account --key-file=/tmp/gcp-credentials.json
+gcloud config set project "$GCP_PROJECT_ID"
+gcloud auth configure-docker gcr.io --quiet
+
+cd "$REMOTE_DIR"
+
+# Lista de servicios a construir
+services_to_build="cloud-config service-discovery api-gateway proxy-client user-service product-service favourite-service order-service shipping-service payment-service"
+
+for service in $services_to_build; do
+  if [ -d "$service" ] && [ -f "$service/Dockerfile" ]; then
+    echo "🔨 Construyendo imagen para $service..."
+    docker build -t "${IMAGE_REGISTRY}/${service}:${IMAGE_TAG}" "./${service}"
+    
+    echo "📤 Subiendo imagen ${IMAGE_REGISTRY}/${service}:${IMAGE_TAG}..."
+    docker push "${IMAGE_REGISTRY}/${service}:${IMAGE_TAG}"
+    
+    echo "✅ Imagen subida: ${IMAGE_REGISTRY}/${service}:${IMAGE_TAG}"
+  else
+    echo "⚠️  Servicio $service no tiene Dockerfile, omitiendo..."
+  fi
+done
+
+echo "🧹 Limpiando credenciales temporales..."
+rm -f /tmp/gcp-credentials.json
+
+echo "✅ Todas las imágenes fueron construidas y subidas exitosamente"
+EOFBUILD
+'''
+            }
+          }
+        }
+      }
+    }
+
     stage('Deploy to Kubernetes') {
       when {
         expression { return params.DEPLOY_TO_K8S?.toString()?.toBoolean() }

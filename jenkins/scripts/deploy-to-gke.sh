@@ -144,12 +144,18 @@ log_info "Servicios a desplegar: ${SERVICES[*]}"
 
 BASE_MANIFEST_DIR="${INFRA_REPO_DIR}/kubernetes/manifests"
 if [[ -d "${BASE_MANIFEST_DIR}" ]]; then
-  for base in namespace.yaml configmap.yaml secret.yaml; do
+  for base in namespace.yaml configmap.yaml; do
     if [[ -f "${BASE_MANIFEST_DIR}/${base}" ]]; then
       log_info "Aplicando manifiesto base ${base}..."
       kubectl apply -f "${BASE_MANIFEST_DIR}/${base}"
     fi
   done
+  
+  # Aplicar el secret base (sin docker-registry-secret, lo crearemos después)
+  if [[ -f "${BASE_MANIFEST_DIR}/secret.yaml" ]]; then
+    log_info "Aplicando secrets base (sin docker-registry-secret)..."
+    kubectl apply -f "${BASE_MANIFEST_DIR}/secret.yaml" --namespace "${K8S_NAMESPACE}" || true
+  fi
 else
   log_warn "No se encontró ${BASE_MANIFEST_DIR}; se continuará sin manifiestos base."
 fi
@@ -158,6 +164,14 @@ kubectl get namespace "${K8S_NAMESPACE}" >/dev/null 2>&1 || {
   log_info "Creando namespace ${K8S_NAMESPACE}..."
   kubectl create namespace "${K8S_NAMESPACE}"
 }
+
+log_info "Configurando secreto de Docker Registry para GCR..."
+kubectl --namespace "${K8S_NAMESPACE}" create secret docker-registry docker-registry-secret \
+  --docker-server=gcr.io \
+  --docker-username=_json_key \
+  --docker-password="$(cat ${GOOGLE_APPLICATION_CREDENTIALS})" \
+  --docker-email=jenkins@ecommerce.local \
+  --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl --namespace "${K8S_NAMESPACE}" patch configmap ecommerce-config --type merge \
   --patch "{\"data\":{\"SPRING_PROFILES_ACTIVE\":\"${K8S_ENVIRONMENT}\"}}" >/dev/null 2>&1 || true
