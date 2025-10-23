@@ -21,7 +21,7 @@ pipeline {
     string(name: 'K8S_IMAGE_REGISTRY', defaultValue: 'gcr.io/devops-activity', description: 'Registro de contenedores (p. ej. gcr.io/proyecto)')
     string(name: 'K8S_IMAGE_TAG', defaultValue: '', description: 'Tag de las imágenes a desplegar (vacío usa el commit actual)')
     string(name: 'INFRA_REPO_URL', defaultValue: 'https://github.com/OscarMURA/infra-ecommerce-microservice-backend-app.git', description: 'Repositorio con manifiestos de infraestructura')
-    string(name: 'INFRA_REPO_BRANCH', defaultValue: 'main', description: 'Rama del repositorio de infraestructura a usar')
+    string(name: 'INFRA_REPO_BRANCH', defaultValue: 'infra/master', description: 'Rama del repositorio de infraestructura a usar')
   }
 
   environment {
@@ -643,7 +643,7 @@ EOFBUILD
             if (!infraRepoUrl) {
               error "El parámetro INFRA_REPO_URL es requerido para clonar los manifiestos."
             }
-            def infraRepoBranch = params.INFRA_REPO_BRANCH?.trim() ?: 'main'
+            def infraRepoBranch = params.INFRA_REPO_BRANCH?.trim() ?: 'infra/master'
 
             def workspaceRoot = pwd()
             def infraDir = "${workspaceRoot}/infra-k8s-config"

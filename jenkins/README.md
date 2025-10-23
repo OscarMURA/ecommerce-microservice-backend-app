@@ -25,8 +25,8 @@ Pipeline pensado para un Job de Jenkins que:
 - Credenciales:
   - `digitalocean-token`: Secret Text con token de DigitalOcean (mismo que usa `Jenkins_Create_VM`).
   - `integration-vm-password`: Secret Text con la contraseña del usuario `jenkins` de la VM.
-  - `gcp-project-id`: Secret Text con el ID del proyecto de GCP donde vive el cluster.
-  - `gcp-service-account`: Credential tipo “Secret file” con la key JSON de una service account con permisos en GKE.
+- `gcp-project-id`: Secret Text con el ID del proyecto de GCP donde vive el cluster.
+- `gcp-service-account`: Credential tipo “Secret file” con la key JSON de una service account con permisos en GKE **y** Artifact/Container Registry (`roles/artifactregistry.writer` o `roles/storage.objectAdmin` según el registro).
 
 ### Parámetros del job
 
@@ -47,7 +47,7 @@ Pipeline pensado para un Job de Jenkins que:
 | `K8S_SERVICES` | Lista separada por espacios o comas de microservicios a desplegar | `cloud-config service-discovery api-gateway proxy-client user-service product-service favourite-service order-service shipping-service payment-service` |
 | `GKE_CLUSTER_NAME` | Nombre del cluster de Google Kubernetes Engine | `ecommerce-dev-gke-v2` |
 | `GKE_LOCATION` | Zona o región donde corre el cluster (p. ej. `us-central1-a`) | `us-central1-a` |
-| `K8S_IMAGE_REGISTRY` | Prefijo del registro donde se publican las imágenes Docker | `gcr.io/devops-activity` |
+| `K8S_IMAGE_REGISTRY` | Prefijo del registro donde se publican las imágenes Docker | `us-docker.pkg.dev/devops-activity/app-images` |
 | `K8S_IMAGE_TAG` | Tag de imagen a desplegar (vacío usa `GIT_COMMIT[0..6]`) | `` |
 | `INFRA_REPO_URL` | Repositorio Git con manifiestos/base de infraestructura | `https://github.com/OscarMURA/infra-ecommerce-microservice-backend-app.git` |
 | `INFRA_REPO_BRANCH` | Rama del repositorio de infraestructura | `main` |
@@ -61,6 +61,7 @@ Pipeline pensado para un Job de Jenkins que:
   4. Muestra un resumen (`kubectl get deployments|services|pods`) y, para servicios `LoadBalancer`, espera su IP pública (por defecto solo `api-gateway`).
 - `K8S_SERVICES` debe incluir las dependencias (`cloud-config`, `service-discovery`). Si se omiten, el pipeline las agrega automáticamente.
 - `K8S_IMAGE_TAG` vacío deriva el tag del commit (`GIT_COMMIT.take(7)`), útil si las imágenes se publican con ese mismo tag durante el pipeline.
+- Si utilizas Artifact Registry, crea primero el repositorio (por ejemplo `gcloud artifacts repositories create app-images --repository-format=docker --location=us`) y ejecuta `gcloud auth configure-docker us-docker.pkg.dev`. Para Container Registry clásico (`gcr.io/...`), habilita la API “Container Registry” y otorga a la service account permisos sobre el bucket `artifacts.<PROJECT_ID>.appspot.com`.
 
 ### Salida
 

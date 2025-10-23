@@ -10,10 +10,10 @@ pipeline {
     string(name: 'K8S_SERVICES', defaultValue: 'cloud-config service-discovery api-gateway proxy-client user-service product-service favourite-service order-service shipping-service payment-service', description: 'Servicios a desplegar')
     string(name: 'GKE_CLUSTER_NAME', defaultValue: 'ecommerce-dev-gke-v2', description: 'Nombre del cluster GKE')
     string(name: 'GKE_LOCATION', defaultValue: 'us-central1-a', description: 'Zona del cluster GKE')
-    string(name: 'K8S_IMAGE_REGISTRY', defaultValue: 'gcr.io/devops-activity', description: 'Registro de contenedores')
+    string(name: 'K8S_IMAGE_REGISTRY', defaultValue: 'us-docker.pkg.dev/devops-activity/app-images', description: 'Registro de contenedores (p. ej. us-docker.pkg.dev/PROJECT/REPO)')
     string(name: 'K8S_IMAGE_TAG', defaultValue: '', description: 'Tag de las imágenes (vacío = commit actual)')
     string(name: 'INFRA_REPO_URL', defaultValue: 'https://github.com/OscarMURA/infra-ecommerce-microservice-backend-app.git', description: 'Repositorio de manifiestos K8s')
-    string(name: 'INFRA_REPO_BRANCH', defaultValue: 'main', description: 'Rama del repo de infraestructura')
+    string(name: 'INFRA_REPO_BRANCH', defaultValue: 'infra/master', description: 'Rama del repo de infraestructura')
     booleanParam(name: 'BUILD_IMAGES', defaultValue: true, description: 'Construir y subir imágenes Docker antes de desplegar')
     string(name: 'VM_NAME', defaultValue: 'ecommerce-integration-runner', description: 'VM de DigitalOcean para construir imágenes')
   }
@@ -151,7 +151,14 @@ fi
 echo "🔐 Autenticando con GCP..."
 gcloud auth activate-service-account --key-file="$GCP_CREDS_FILE"
 gcloud config set project "$GCP_PROJECT_ID"
-gcloud auth configure-docker gcr.io --quiet
+
+# Detectar host del registro (gcr.io, us-docker.pkg.dev, etc.) y configurar docker
+REGISTRY_HOST="$(echo "$IMAGE_REGISTRY" | cut -d/ -f1)"
+if [ -z "$REGISTRY_HOST" ]; then
+  echo "❌ No se pudo determinar el host del registro a partir de '$IMAGE_REGISTRY'"
+  exit 1
+fi
+gcloud auth configure-docker "$REGISTRY_HOST" --quiet
 
 services="cloud-config service-discovery api-gateway proxy-client user-service product-service favourite-service order-service shipping-service payment-service"
 
@@ -227,7 +234,7 @@ EOFBUILD
               }
             }
 
-            echo "📦 Desplegando servicios con tag: ${imageTag}"
+echo "📦 Desplegando servicios con tag: ${imageTag}"
 
             def workspaceRoot = pwd()
             def infraDir = "${workspaceRoot}/infra-k8s-config"
