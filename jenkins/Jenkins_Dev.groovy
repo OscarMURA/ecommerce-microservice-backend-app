@@ -553,6 +553,7 @@ services_to_build="cloud-config service-discovery api-gateway proxy-client user-
 
 for service in $services_to_build; do
   SERVICE_DIR="$REMOTE_DIR/$service"
+  DOCKERFILE_PATH="$SERVICE_DIR/Dockerfile"
   
   # Verificar si existe el directorio del servicio
   if [ ! -d "$SERVICE_DIR" ]; then
@@ -561,7 +562,7 @@ for service in $services_to_build; do
   fi
   
   # Verificar si existe Dockerfile en el directorio del servicio
-  if [ ! -f "$SERVICE_DIR/Dockerfile" ]; then
+  if [ ! -f "$DOCKERFILE_PATH" ]; then
     echo "⚠️  Omitiendo $service (no tiene Dockerfile)"
     continue
   fi
@@ -571,8 +572,10 @@ for service in $services_to_build; do
   echo "🔨 Construyendo: $service"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   
-  # Construir desde el directorio del servicio
-  docker build -t "${IMAGE_REGISTRY}/${service}:${IMAGE_TAG}" "$SERVICE_DIR" \
+  # Construir desde la raíz del repositorio, usando -f para especificar el Dockerfile
+  # Esto permite que los COPY en el Dockerfile funcionen correctamente
+  docker build -t "${IMAGE_REGISTRY}/${service}:${IMAGE_TAG}" "$REMOTE_DIR" \
+    -f "$DOCKERFILE_PATH" \
     --build-arg SERVICE_NAME="$service" \
     --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
     || {
