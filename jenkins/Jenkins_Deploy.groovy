@@ -155,21 +155,41 @@ cd "$REMOTE_DIR"
 services="cloud-config service-discovery api-gateway proxy-client user-service product-service favourite-service order-service shipping-service payment-service"
 
 for service in $services; do
-  if [ -d "$service" ] && [ -f "$service/Dockerfile" ]; then
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🔨 Construyendo: $service"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    
-    docker build -t "${IMAGE_REGISTRY}/${service}:${IMAGE_TAG}" "./${service}"
-    
-    echo "📤 Subiendo: ${IMAGE_REGISTRY}/${service}:${IMAGE_TAG}"
-    docker push "${IMAGE_REGISTRY}/${service}:${IMAGE_TAG}"
-    
-    echo "✅ Completado: $service"
-  else
-    echo "⚠️  Omitiendo $service (no tiene Dockerfile)"
+  SERVICE_DIR="$REMOTE_DIR/$service"
+  
+  # Verificar si existe el directorio del servicio
+  if [ ! -d "$SERVICE_DIR" ]; then
+    echo "⚠️  Omitiendo $service (directorio no existe)"
+    continue
   fi
+  
+  # Verificar si existe Dockerfile en el directorio del servicio
+  if [ ! -f "$SERVICE_DIR/Dockerfile" ]; then
+    echo "⚠️  Omitiendo $service (no tiene Dockerfile)"
+    continue
+  fi
+  
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "🔨 Construyendo: $service"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  
+  # Construir desde el directorio del servicio
+  docker build -t "${IMAGE_REGISTRY}/${service}:${IMAGE_TAG}" "$SERVICE_DIR" \
+    --build-arg SERVICE_NAME="$service" \
+    --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+    || {
+      echo "❌ Error construyendo $service"
+      continue
+    }
+  
+  echo "📤 Subiendo: ${IMAGE_REGISTRY}/${service}:${IMAGE_TAG}"
+  docker push "${IMAGE_REGISTRY}/${service}:${IMAGE_TAG}" || {
+    echo "❌ Error subiendo $service"
+    continue
+  }
+  
+  echo "✅ Completado: $service"
 done
 
 # Limpiar credenciales
