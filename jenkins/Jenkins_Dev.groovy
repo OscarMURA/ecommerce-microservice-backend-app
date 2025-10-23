@@ -530,15 +530,17 @@ export SSHPASS="$VM_PASSWORD"
 
 echo "🔐 Copiando credenciales de GCP a la VM..."
 sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  "${GOOGLE_APPLICATION_CREDENTIALS}" jenkins@"$TARGET_IP":/tmp/gcp-credentials.json
+  "${GOOGLE_APPLICATION_CREDENTIALS}" jenkins@"$TARGET_IP":~/gcp-credentials.json
 
 echo "🔨 Construyendo y subiendo imágenes Docker..."
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   jenkins@"$TARGET_IP" "GCP_PROJECT_ID='$GCP_PROJECT_ID' IMAGE_REGISTRY='$IMAGE_REGISTRY' IMAGE_TAG='$IMAGE_TAG' REMOTE_DIR='$REMOTE_DIR' SERVICE_LIST='$SERVICE_LIST' bash -s" <<'EOFBUILD'
 set -euo pipefail
 
+GCP_CREDS_FILE="$HOME/gcp-credentials.json"
+
 echo "🔐 Autenticando con Google Cloud..."
-gcloud auth activate-service-account --key-file=/tmp/gcp-credentials.json
+gcloud auth activate-service-account --key-file="$GCP_CREDS_FILE"
 gcloud config set project "$GCP_PROJECT_ID"
 gcloud auth configure-docker gcr.io --quiet
 
@@ -562,7 +564,7 @@ for service in $services_to_build; do
 done
 
 echo "🧹 Limpiando credenciales temporales..."
-rm -f /tmp/gcp-credentials.json
+rm -f "$GCP_CREDS_FILE"
 
 echo "✅ Todas las imágenes fueron construidas y subidas exitosamente"
 EOFBUILD

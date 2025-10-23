@@ -123,7 +123,7 @@ EOFSYNC
 
 echo "🔐 Copiando credenciales de GCP..."
 sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  "${GOOGLE_APPLICATION_CREDENTIALS}" jenkins@"$TARGET_IP":/tmp/gcp-credentials.json
+  "${GOOGLE_APPLICATION_CREDENTIALS}" jenkins@"$TARGET_IP":~/gcp-credentials.json
 
 echo "🔨 Construyendo y subiendo imágenes..."
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
@@ -131,6 +131,7 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 set -euo pipefail
 
 REMOTE_DIR="/opt/ecommerce-app/backend"
+GCP_CREDS_FILE="$HOME/gcp-credentials.json"
 
 # Verificar que gcloud esté instalado
 if ! command -v gcloud &> /dev/null; then
@@ -145,7 +146,7 @@ if ! command -v gcloud &> /dev/null; then
 fi
 
 echo "🔐 Autenticando con GCP..."
-gcloud auth activate-service-account --key-file=/tmp/gcp-credentials.json
+gcloud auth activate-service-account --key-file="$GCP_CREDS_FILE"
 gcloud config set project "$GCP_PROJECT_ID"
 gcloud auth configure-docker gcr.io --quiet
 
@@ -172,7 +173,7 @@ for service in $services; do
 done
 
 # Limpiar credenciales
-rm -f /tmp/gcp-credentials.json
+rm -f "$GCP_CREDS_FILE"
 
 echo ""
 echo "✅ Todas las imágenes fueron construidas y subidas"
