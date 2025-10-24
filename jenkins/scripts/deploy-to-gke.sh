@@ -270,15 +270,15 @@ ${extra_env_block}
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 120
-            periodSeconds: 20
-            failureThreshold: 5
+            initialDelaySeconds: 180
+            periodSeconds: 15
+            failureThreshold: 8
             timeoutSeconds: 10
           livenessProbe:
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 150
+            initialDelaySeconds: 240
             periodSeconds: 30
             failureThreshold: 3
             timeoutSeconds: 10
