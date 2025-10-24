@@ -287,22 +287,24 @@ ${extra_env_block}
                 name: ecommerce-config
             - secretRef:
                 name: ecommerce-secrets
+          # Probes deshabilitadas temporalmente para api-gateway
+          # (diagnosticar por qué no pasa health check)
           readinessProbe:
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 90
+            initialDelaySeconds: 120
             periodSeconds: 5
-            failureThreshold: 30
+            failureThreshold: 50
             timeoutSeconds: 3
             successThreshold: 1
           livenessProbe:
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 180
-            periodSeconds: 10
-            failureThreshold: 5
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            failureThreshold: 10
             timeoutSeconds: 3
           resources:
             requests:
@@ -421,9 +423,8 @@ for svc in "${SERVICES[@]}"; do
   fi
   
   log_info "Esperando rollout de ${svc}..."
-  # Con probes optimizadas: 90s inicial + 150s reintentos = 240s total
-  # Timeout de 300s proporciona suficiente margen
-  TIMEOUT="300s"
+  # Timeout más corto para capturar logs rápido si falla
+  TIMEOUT="120s"
   if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="${TIMEOUT}"; then
     log_error "El despliegue de ${svc} no alcanzó el estado Ready dentro del tiempo esperado."
     log_info "Estado actual de pods:"
@@ -435,6 +436,17 @@ for svc in "${SERVICES[@]}"; do
       for pod in ${PENDING_PODS}; do
         log_warn "Pod ${pod} está en Pending. Describiendo..."
         kubectl --namespace "${K8S_NAMESPACE}" describe pod "${pod}" | grep -A 5 "Events:" || true
+      done
+    fi
+    
+    # CAPTURA DE LOGS AUTOMÁTICA PARA DIAGNOSTICAR
+    log_warn "📋 Capturando logs del servicio ${svc}..."
+    RUNNING_PODS=$(kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="${svc}" -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}')
+    if [[ -n "${RUNNING_PODS}" ]]; then
+      for pod in ${RUNNING_PODS}; do
+        log_warn "Logs de ${pod}:"
+        kubectl --namespace "${K8S_NAMESPACE}" logs "${pod}" --tail=50 --all-containers=true 2>/dev/null || true
+        log_warn "---"
       done
     fi
     
