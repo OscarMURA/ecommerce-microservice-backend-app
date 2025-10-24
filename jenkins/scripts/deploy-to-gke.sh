@@ -289,13 +289,6 @@ ${extra_env_block}
             limits:
               cpu: ${cpu_limit}
               memory: ${mem_limit}
-          resources:
-            requests:
-              cpu: ${cpu_request}
-              memory: ${mem_request}
-            limits:
-              cpu: ${cpu_limit}
-              memory: ${mem_limit}
 ---
 apiVersion: v1
 kind: Service
