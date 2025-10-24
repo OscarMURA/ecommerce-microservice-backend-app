@@ -166,8 +166,13 @@ kubectl get namespace "${K8S_NAMESPACE}" >/dev/null 2>&1 || {
 }
 
 log_info "Configurando secreto de Docker Registry para GCR..."
+REGISTRY_HOST="$(echo "${K8S_IMAGE_REGISTRY}" | cut -d/ -f1)"
+if [[ -z "${REGISTRY_HOST}" ]]; then
+  log_warn "No se pudo derivar el host del registro desde '${K8S_IMAGE_REGISTRY}'. Usando gcr.io."
+  REGISTRY_HOST="gcr.io"
+fi
 kubectl --namespace "${K8S_NAMESPACE}" create secret docker-registry docker-registry-secret \
-  --docker-server=gcr.io \
+  --docker-server="${REGISTRY_HOST}" \
   --docker-username=_json_key \
   --docker-password="$(cat ${GOOGLE_APPLICATION_CREDENTIALS})" \
   --docker-email=jenkins@ecommerce.local \
