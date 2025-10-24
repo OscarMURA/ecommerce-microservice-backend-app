@@ -198,12 +198,10 @@ render_manifest() {
     if [[ -n "${K8S_ENVIRONMENT}" && "${K8S_ENVIRONMENT}" != "native" ]]; then
       active_profiles="native,${K8S_ENVIRONMENT}"
     fi
-    read -r -d '' extra_env_block <<EOFENV || true
-            - name: SPRING_PROFILES_ACTIVE
-              value: "${active_profiles}"
+    extra_env_block="            - name: SPRING_PROFILES_ACTIVE
+              value: \"${active_profiles}\"
             - name: SPRING_CLOUD_CONFIG_SERVER_NATIVE_SEARCH_LOCATIONS
-              value: "classpath:/configs"
-EOFENV
+              value: \"classpath:/configs\""
   fi
 
   cat > "${manifest}" <<EOF
