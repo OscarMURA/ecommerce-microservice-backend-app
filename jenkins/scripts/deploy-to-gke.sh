@@ -192,17 +192,18 @@ render_manifest() {
   local replicas="${SERVICE_REPLICAS[${svc}]:-${K8S_DEFAULT_REPLICAS}}"
   local manifest="${RENDER_DIR}/${svc}.yaml"
   local extra_env_block=""
-  local cpu_request="50m"
-  local cpu_limit="250m"
-  local mem_request="128Mi"
-  local mem_limit="256Mi"
+  # Ultra-low CPU requests debido a limitaciones del cluster
+  local cpu_request="15m"
+  local cpu_limit="100m"
+  local mem_request="96Mi"
+  local mem_limit="192Mi"
 
-  # Asignar más recursos a servicios específicos
+  # Asignar ligeramente más recursos a servicios críticos (pero todavía muy bajos)
   if [[ "${svc}" == "cloud-config" || "${svc}" == "service-discovery" ]]; then
-    cpu_request="100m"
-    cpu_limit="500m"
-    mem_request="256Mi"
-    mem_limit="512Mi"
+    cpu_request="25m"
+    cpu_limit="150m"
+    mem_request="128Mi"
+    mem_limit="256Mi"
   fi
 
   if [[ "${svc}" == "cloud-config" ]]; then
@@ -269,16 +270,18 @@ ${extra_env_block}
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            failureThreshold: 6
+            initialDelaySeconds: 45
+            periodSeconds: 15
+            failureThreshold: 8
+            timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: ${health_path}
               port: http
             initialDelaySeconds: 60
-            periodSeconds: 20
+            periodSeconds: 30
             failureThreshold: 3
+            timeoutSeconds: 5
           resources:
             requests:
               cpu: ${cpu_request}
@@ -342,7 +345,8 @@ done
 for svc in "${CRITICAL_SERVICES[@]}"; do
   if [[ -n "${SEEN[${svc}]:-}" ]]; then
     log_info "Esperando rollout de servicio crítico: ${svc}..."
-    if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="600s"; then
+    # Con recursos muy bajos, necesitamos un timeout más largo (5 minutos)
+    if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="300s"; then
       log_error "El servicio crítico ${svc} no alcanzó el estado Ready dentro del tiempo esperado."
       
       # Mostrar información detallada de debugging
@@ -395,7 +399,9 @@ done
 
 for svc in "${SERVICES[@]}"; do
   log_info "Esperando rollout de ${svc}..."
-  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="${K8S_ROLLOUT_TIMEOUT}s"; then
+  # Timeout más corto para segunda fase (2 minutos)
+  TIMEOUT="${K8S_ROLLOUT_TIMEOUT:-120}"
+  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="${TIMEOUT}s"; then
     log_error "El despliegue de ${svc} no alcanzó el estado Ready dentro del tiempo esperado."
     log_info "Estado actual de pods:"
     kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="${svc}" -o wide
