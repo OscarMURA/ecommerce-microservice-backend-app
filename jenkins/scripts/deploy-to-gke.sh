@@ -191,6 +191,20 @@ render_manifest() {
   local health_path="${SERVICE_HEALTH_PATH[${svc}]:-/actuator/health}"
   local replicas="${SERVICE_REPLICAS[${svc}]:-${K8S_DEFAULT_REPLICAS}}"
   local manifest="${RENDER_DIR}/${svc}.yaml"
+  local extra_env_block=""
+
+  if [[ "${svc}" == "cloud-config" ]]; then
+    local active_profiles="native"
+    if [[ -n "${K8S_ENVIRONMENT}" && "${K8S_ENVIRONMENT}" != "native" ]]; then
+      active_profiles="native,${K8S_ENVIRONMENT}"
+    fi
+    read -r -d '' extra_env_block <<EOFENV || true
+            - name: SPRING_PROFILES_ACTIVE
+              value: "${active_profiles}"
+            - name: SPRING_CLOUD_CONFIG_SERVER_NATIVE_SEARCH_LOCATIONS
+              value: "classpath:/configs"
+EOFENV
+  fi
 
   cat > "${manifest}" <<EOF
 apiVersion: apps/v1
@@ -235,6 +249,7 @@ spec:
           env:
             - name: SERVER_PORT
               value: "${port}"
+${extra_env_block}
           envFrom:
             - configMapRef:
                 name: ecommerce-config
