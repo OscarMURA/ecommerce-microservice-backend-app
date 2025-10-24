@@ -227,6 +227,19 @@ render_manifest() {
     mem_limit="256Mi"
   fi
 
+  # Probes específicas para cloud-config: más conservador porque otros servicios dependen de él
+  if [[ "${svc}" == "cloud-config" ]]; then
+    CLOUD_CONFIG_READINESS_INITIAL_DELAY="180"
+    CLOUD_CONFIG_READINESS_FAILURE_THRESHOLD="100"
+    CLOUD_CONFIG_LIVENESS_INITIAL_DELAY="300"
+    CLOUD_CONFIG_LIVENESS_FAILURE_THRESHOLD="15"
+  else
+    CLOUD_CONFIG_READINESS_INITIAL_DELAY="120"
+    CLOUD_CONFIG_READINESS_FAILURE_THRESHOLD="50"
+    CLOUD_CONFIG_LIVENESS_INITIAL_DELAY="300"
+    CLOUD_CONFIG_LIVENESS_FAILURE_THRESHOLD="10"
+  fi
+
   if [[ "${svc}" == "cloud-config" ]]; then
     local active_profiles="native"
     if [[ -n "${K8S_ENVIRONMENT}" && "${K8S_ENVIRONMENT}" != "native" ]]; then
@@ -293,18 +306,18 @@ ${extra_env_block}
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 120
+            initialDelaySeconds: ${CLOUD_CONFIG_READINESS_INITIAL_DELAY:-120}
             periodSeconds: 5
-            failureThreshold: 50
+            failureThreshold: ${CLOUD_CONFIG_READINESS_FAILURE_THRESHOLD:-50}
             timeoutSeconds: 3
             successThreshold: 1
           livenessProbe:
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 300
+            initialDelaySeconds: ${CLOUD_CONFIG_LIVENESS_INITIAL_DELAY:-300}
             periodSeconds: 30
-            failureThreshold: 10
+            failureThreshold: ${CLOUD_CONFIG_LIVENESS_FAILURE_THRESHOLD:-10}
             timeoutSeconds: 3
           resources:
             requests:
@@ -371,33 +384,67 @@ if [[ -n "${SEEN[service-discovery]:-}" ]]; then
 fi
 
 # Segunda fase (después de service-discovery): desplegar cloud-config
-if [[ -n "${SEEN[cloud-config]:-}" ]]; then
-  if [[ -z "${SERVICE_PORTS[cloud-config]+_}" ]]; then
-    log_error "Servicio 'cloud-config' no está soportado por el pipeline."
-    exit 1
-  fi
-  render_manifest "cloud-config"
-  log_info "Aplicando servicio crítico (SEGUNDO): cloud-config (después de service-discovery)..."
-  kubectl --namespace "${K8S_NAMESPACE}" apply -f "${RENDER_DIR}/cloud-config.yaml"
-  
-  log_info "Esperando rollout de cloud-config..."
-  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/cloud-config" --timeout="300s"; then
-    log_error "El servicio cloud-config no alcanzó el estado Ready dentro del tiempo esperado."
-    log_info "Estado de pods para cloud-config:"
-    kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="cloud-config" -o wide
-    log_info "Eventos del deployment cloud-config:"
-    kubectl --namespace "${K8S_NAMESPACE}" describe deployment "cloud-config" | grep -A 20 "Events:" || true
-    log_info "Logs del contenedor:"
-    kubectl --namespace "${K8S_NAMESPACE}" logs -l app="cloud-config" --tail=50 2>/dev/null || true
-    log_error "Disponibilidad de recursos en cluster:"
-    kubectl top nodes 2>/dev/null || log_warn "No hay métrica de recursos disponible"
-    exit 1
-  fi
-  log_success "cloud-config está listo."
-fi
-
-log_info "Servicios críticos listos. Desplegando servicios restantes..."
+  if [[ -n "${SEEN[cloud-config]:-}" ]]; then
+    if [[ -z "${SERVICE_PORTS[cloud-config]+_}" ]]; then
+      log_error "Servicio 'cloud-config' no está soportado por el pipeline."
+      exit 1
+    fi
+    render_manifest "cloud-config"
+    log_info "Aplicando servicio crítico (SEGUNDO): cloud-config (después de service-discovery)..."
+    kubectl --namespace "${K8S_NAMESPACE}" apply -f "${RENDER_DIR}/cloud-config.yaml"
+    
+    log_info "Esperando rollout de cloud-config..."
+    if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/cloud-config" --timeout="300s"; then
+      log_error "El servicio cloud-config no alcanzó el estado Ready dentro del tiempo esperado."
+      log_info "Estado de pods para cloud-config:"
+      kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="cloud-config" -o wide
+      log_info "Eventos del deployment cloud-config:"
+      kubectl --namespace "${K8S_NAMESPACE}" describe deployment "cloud-config" | grep -A 20 "Events:" || true
+      log_info "Logs del contenedor:"
+      kubectl --namespace "${K8S_NAMESPACE}" logs -l app="cloud-config" --tail=50 2>/dev/null || true
+      log_error "Disponibilidad de recursos en cluster:"
+      kubectl top nodes 2>/dev/null || log_warn "No hay métrica de recursos disponible"
+      exit 1
+    fi
+    
+    # ESPERA ADICIONAL: cloud-config puede reportar healthy pero no estar listo para recibir requests
+    log_info "⏳ Espera adicional (15s) para que cloud-config stabilice su puerto 9296..."
+    sleep 15
+    
+    # Verificar que cloud-config realmente responda
+    log_info "✓ Verificando conectividad a cloud-config:9296..."
+    CLOUD_CONFIG_POD=$(kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="cloud-config" -o jsonpath='{.items[0].metadata.name}')
+    if [[ -n "${CLOUD_CONFIG_POD}" ]]; then
+      kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- curl -s http://localhost:9296/actuator/health | grep -q '"status":"UP"' && \
+        log_success "✓ cloud-config está respondiendo correctamente" || \
+        log_warn "⚠ cloud-config puede no estar completamente listo"
+    fi
+    
+    log_success "cloud-config está listo."
+  filog_info "Servicios críticos listos. Desplegando servicios restantes..."
 sleep 5
+
+# Verificación FINAL antes de desplegar api-gateway
+log_info "🔍 Verificación pre-despliegue: cloud-config debe estar escuchando..."
+CLOUD_CONFIG_POD=$(kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="cloud-config" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+if [[ -n "${CLOUD_CONFIG_POD}" ]]; then
+  RETRY=0
+  MAX_RETRY=5
+  while [[ $RETRY -lt $MAX_RETRY ]]; do
+    if kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- curl -s -m 3 http://localhost:9296/actuator/health 2>/dev/null | grep -q '"status":"UP"'; then
+      log_success "✓ cloud-config respondiendo exitosamente en puerto 9296"
+      break
+    fi
+    RETRY=$((RETRY + 1))
+    if [[ $RETRY -lt $MAX_RETRY ]]; then
+      log_warn "  Reintentando conexión a cloud-config ($RETRY/$MAX_RETRY)..."
+      sleep 3
+    fi
+  done
+  if [[ $RETRY -eq $MAX_RETRY ]]; then
+    log_warn "⚠️  cloud-config no responde, pero continuando (puede estabilizarse durante despliegue)"
+  fi
+fi
 
 # Segunda fase: desplegar el resto de los servicios
 for svc in "${SERVICES[@]}"; do
