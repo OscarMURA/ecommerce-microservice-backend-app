@@ -297,17 +297,17 @@ ${extra_env_block}
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 300
+            initialDelaySeconds: 180
             periodSeconds: 10
-            failureThreshold: 10
+            failureThreshold: 20
             timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 360
+            initialDelaySeconds: 300
             periodSeconds: 30
-            failureThreshold: 3
+            failureThreshold: 5
             timeoutSeconds: 5
           resources:
             requests:
@@ -358,7 +358,7 @@ if [[ -n "${SEEN[service-discovery]:-}" ]]; then
   kubectl --namespace "${K8S_NAMESPACE}" apply -f "${RENDER_DIR}/service-discovery.yaml"
   
   log_info "Esperando rollout de service-discovery (dependencia crítica)..."
-  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/service-discovery" --timeout="300s"; then
+  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/service-discovery" --timeout="400s"; then
     log_error "El servicio service-discovery no alcanzó el estado Ready dentro del tiempo esperado."
     log_info "Estado de pods para service-discovery:"
     kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="service-discovery" -o wide
@@ -384,7 +384,7 @@ if [[ -n "${SEEN[cloud-config]:-}" ]]; then
   kubectl --namespace "${K8S_NAMESPACE}" apply -f "${RENDER_DIR}/cloud-config.yaml"
   
   log_info "Esperando rollout de cloud-config..."
-  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/cloud-config" --timeout="300s"; then
+  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/cloud-config" --timeout="400s"; then
     log_error "El servicio cloud-config no alcanzó el estado Ready dentro del tiempo esperado."
     log_info "Estado de pods para cloud-config:"
     kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="cloud-config" -o wide
