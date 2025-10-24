@@ -142,32 +142,26 @@ fi
 
 log_info "Servicios a desplegar: ${SERVICES[*]}"
 
-# Limpiar replicasets viejos que puedan estar en CrashLoopBackOff
-log_info "Limpiando deployments y replicasets viejos que puedan causar problemas..."
+# Limpieza optimizada: eliminar deployments en paralelo sin bloquear
+log_info "Limpiando deployments viejos (en paralelo)..."
 for svc in "${SERVICES[@]}"; do
-  # Intentar eliminar el deployment existente completamente (con todos sus ReplicaSets)
-  log_info "Verificando deployment previo: ${svc}"
-  if kubectl --namespace "${K8S_NAMESPACE}" get deployment "${svc}" &>/dev/null; then
-    log_info "Eliminando deployment anterior: ${svc}"
-    kubectl --namespace "${K8S_NAMESPACE}" delete deployment "${svc}" --cascade=foreground --ignore-not-found=true --wait=true --timeout=30s || true
-    sleep 2
+  # Eliminar en background sin esperar (--cascade=background es más rápido)
+  if kubectl --namespace "${K8S_NAMESPACE}" get deployment "${svc}" &>/dev/null 2>&1; then
+    kubectl --namespace "${K8S_NAMESPACE}" delete deployment "${svc}" --cascade=background --ignore-not-found=true 2>/dev/null &
   fi
-  
-  # También limpiar replicasets huérfanos
-  OLD_RS=$(kubectl --namespace "${K8S_NAMESPACE}" get rs -l app="${svc}" --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[:-1].metadata.name}' 2>/dev/null || true)
-  if [[ -n "${OLD_RS}" ]]; then
-    for rs in ${OLD_RS}; do
-      log_info "Eliminando replicaset huérfano: ${rs}"
-      kubectl --namespace "${K8S_NAMESPACE}" delete rs "${rs}" --cascade=foreground --ignore-not-found=true --wait=true --timeout=30s || true
-    done
-  fi
-  
-  # Esperar a que los pods se terminen
-  log_info "Esperando a que los pods del deployment anterior se terminen..."
-  kubectl --namespace "${K8S_NAMESPACE}" delete pods -l app="${svc}" --grace-period=0 --force --ignore-not-found=true 2>/dev/null || true
-  sleep 3
 done
-log_success "Limpieza de deployments y replicasets completada."
+
+# Esperar a que todos los deletes terminen en paralelo
+wait
+
+# Espera rápida para que los pods se terminen
+log_info "Esperando a que los pods antiguos se terminen..."
+for svc in "${SERVICES[@]}"; do
+  kubectl --namespace "${K8S_NAMESPACE}" delete pods -l app="${svc}" --grace-period=5 --ignore-not-found=true 2>/dev/null || true &
+done
+wait
+
+log_success "Limpieza de deployments completada."
 
 BASE_MANIFEST_DIR="${INFRA_REPO_DIR}/kubernetes/manifests"
 if [[ -d "${BASE_MANIFEST_DIR}" ]]; then
@@ -297,18 +291,19 @@ ${extra_env_block}
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 180
-            periodSeconds: 10
-            failureThreshold: 20
-            timeoutSeconds: 5
+            initialDelaySeconds: 90
+            periodSeconds: 5
+            failureThreshold: 30
+            timeoutSeconds: 3
+            successThreshold: 1
           livenessProbe:
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 300
-            periodSeconds: 30
+            initialDelaySeconds: 180
+            periodSeconds: 10
             failureThreshold: 5
-            timeoutSeconds: 5
+            timeoutSeconds: 3
           resources:
             requests:
               cpu: ${cpu_request}
@@ -358,7 +353,7 @@ if [[ -n "${SEEN[service-discovery]:-}" ]]; then
   kubectl --namespace "${K8S_NAMESPACE}" apply -f "${RENDER_DIR}/service-discovery.yaml"
   
   log_info "Esperando rollout de service-discovery (dependencia crítica)..."
-  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/service-discovery" --timeout="400s"; then
+  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/service-discovery" --timeout="300s"; then
     log_error "El servicio service-discovery no alcanzó el estado Ready dentro del tiempo esperado."
     log_info "Estado de pods para service-discovery:"
     kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="service-discovery" -o wide
@@ -384,7 +379,7 @@ if [[ -n "${SEEN[cloud-config]:-}" ]]; then
   kubectl --namespace "${K8S_NAMESPACE}" apply -f "${RENDER_DIR}/cloud-config.yaml"
   
   log_info "Esperando rollout de cloud-config..."
-  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/cloud-config" --timeout="400s"; then
+  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/cloud-config" --timeout="300s"; then
     log_error "El servicio cloud-config no alcanzó el estado Ready dentro del tiempo esperado."
     log_info "Estado de pods para cloud-config:"
     kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="cloud-config" -o wide
@@ -426,8 +421,9 @@ for svc in "${SERVICES[@]}"; do
   fi
   
   log_info "Esperando rollout de ${svc}..."
-  # Todos los servicios necesitan 400s debido a inicialización lenta de Spring Boot
-  TIMEOUT="400s"
+  # Con probes optimizadas: 90s inicial + 150s reintentos = 240s total
+  # Timeout de 300s proporciona suficiente margen
+  TIMEOUT="300s"
   if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="${TIMEOUT}"; then
     log_error "El despliegue de ${svc} no alcanzó el estado Ready dentro del tiempo esperado."
     log_info "Estado actual de pods:"
