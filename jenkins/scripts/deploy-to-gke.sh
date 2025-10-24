@@ -143,18 +143,31 @@ fi
 log_info "Servicios a desplegar: ${SERVICES[*]}"
 
 # Limpiar replicasets viejos que puedan estar en CrashLoopBackOff
-log_info "Limpiando replicasets viejos que puedan causar problemas..."
+log_info "Limpiando deployments y replicasets viejos que puedan causar problemas..."
 for svc in "${SERVICES[@]}"; do
-  # Obtener todos los replicasets del servicio
+  # Intentar eliminar el deployment existente completamente (con todos sus ReplicaSets)
+  log_info "Verificando deployment previo: ${svc}"
+  if kubectl --namespace "${K8S_NAMESPACE}" get deployment "${svc}" &>/dev/null; then
+    log_info "Eliminando deployment anterior: ${svc}"
+    kubectl --namespace "${K8S_NAMESPACE}" delete deployment "${svc}" --cascade=foreground --ignore-not-found=true --wait=true --timeout=30s || true
+    sleep 2
+  fi
+  
+  # También limpiar replicasets huérfanos
   OLD_RS=$(kubectl --namespace "${K8S_NAMESPACE}" get rs -l app="${svc}" --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[:-1].metadata.name}' 2>/dev/null || true)
   if [[ -n "${OLD_RS}" ]]; then
     for rs in ${OLD_RS}; do
-      log_info "Eliminando replicaset viejo: ${rs}"
-      kubectl --namespace "${K8S_NAMESPACE}" delete rs "${rs}" --cascade=background 2>/dev/null || true
+      log_info "Eliminando replicaset huérfano: ${rs}"
+      kubectl --namespace "${K8S_NAMESPACE}" delete rs "${rs}" --cascade=foreground --ignore-not-found=true --wait=true --timeout=30s || true
     done
   fi
+  
+  # Esperar a que los pods se terminen
+  log_info "Esperando a que los pods del deployment anterior se terminen..."
+  kubectl --namespace "${K8S_NAMESPACE}" delete pods -l app="${svc}" --grace-period=0 --force --ignore-not-found=true 2>/dev/null || true
+  sleep 3
 done
-log_success "Limpieza de replicasets completada."
+log_success "Limpieza de deployments y replicasets completada."
 
 BASE_MANIFEST_DIR="${INFRA_REPO_DIR}/kubernetes/manifests"
 if [[ -d "${BASE_MANIFEST_DIR}" ]]; then
