@@ -91,7 +91,8 @@ curl -sS -H "Authorization: Bearer ${DO_TOKEN}" "https://api.digitalocean.com/v2
               "IMAGE_TAG=${imageTag}",
               "TARGET_IP=${env.DROPLET_IP}",
               "REPO_URL=${params.REPO_URL}",
-              "APP_BRANCH=${params.APP_BRANCH}"
+              "APP_BRANCH=${params.APP_BRANCH}",
+              "REMOTE_GCP_CRED_PATH=/home/jenkins/.config/gcloud/service-account.json"
             ]) {
               sh '''
 set -e
@@ -121,20 +122,23 @@ chmod +x mvnw || true
 echo "✅ Código actualizado en $REMOTE_DIR"
 EOFSYNC
 
-echo "🔐 Copiando credenciales de GCP..."
-CREDS_TEMP_FILE="/tmp/gcp-creds-$RANDOM.json"
-sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  "${GOOGLE_APPLICATION_CREDENTIALS}" jenkins@"$TARGET_IP":"$CREDS_TEMP_FILE"
+echo "🔐 Usando credenciales de GCP ya configuradas en la VM..."
+REMOTE_GCP_CRED_PATH="/home/jenkins/.config/gcloud/service-account.json"
 
 echo "🔨 Construyendo y subiendo imágenes..."
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  jenkins@"$TARGET_IP" "GCP_PROJECT_ID='$GCP_PROJECT_ID' IMAGE_REGISTRY='$IMAGE_REGISTRY' IMAGE_TAG='$IMAGE_TAG' CREDS_TEMP_FILE='$CREDS_TEMP_FILE' bash -s" <<'EOFBUILD'
+  jenkins@"$TARGET_IP" "GCP_PROJECT_ID='$GCP_PROJECT_ID' IMAGE_REGISTRY='$IMAGE_REGISTRY' IMAGE_TAG='$IMAGE_TAG' REMOTE_GCP_CRED_PATH='$REMOTE_GCP_CRED_PATH' bash -s" <<'EOFBUILD'
 set -euo pipefail
 
 REMOTE_DIR="/opt/ecommerce-app/backend"
 
-# Usar la ruta temporal que pasamos
-GCP_CREDS_FILE="$CREDS_TEMP_FILE"
+# Usar la credencial ya provisionada por Jenkins_Create_VM (o la ruta personalizada)
+GCP_CREDS_FILE="${REMOTE_GCP_CRED_PATH:-/home/jenkins/.config/gcloud/service-account.json}"
+
+if [ ! -f "$GCP_CREDS_FILE" ]; then
+  echo "❌ No se encontró la credencial en $GCP_CREDS_FILE. Ejecuta Jenkins_Create_VM con CONFIGURE_GCP_ACCESS=true o ajusta REMOTE_GCP_CRED_PATH."
+  exit 1
+fi
 
 # Verificar que gcloud esté instalado
 if ! command -v gcloud &> /dev/null; then
@@ -202,9 +206,6 @@ for service in $services; do
   
   echo "✅ Completado: $service"
 done
-
-# Limpiar credenciales
-rm -f "$GCP_CREDS_FILE"
 
 echo ""
 echo "✅ Todas las imágenes fueron construidas y subidas"
