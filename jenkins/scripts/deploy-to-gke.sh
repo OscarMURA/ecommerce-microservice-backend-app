@@ -347,55 +347,57 @@ if [[ "${AVAILABLE_NODES}" -eq 0 ]]; then
 fi
 log_info "Nodos disponibles: ${AVAILABLE_NODES}"
 
-# Primera fase: desplegar servicios críticos (cloud-config y service-discovery)
-CRITICAL_SERVICES=("cloud-config" "service-discovery")
-for svc in "${CRITICAL_SERVICES[@]}"; do
-  if [[ -n "${SEEN[${svc}]:-}" ]]; then
-    if [[ -z "${SERVICE_PORTS[${svc}]+_}" ]]; then
-      log_error "Servicio '${svc}' no está soportado por el pipeline."
-      exit 1
-    fi
-    render_manifest "${svc}"
-    log_info "Aplicando servicio crítico: ${svc}..."
-    kubectl --namespace "${K8S_NAMESPACE}" apply -f "${RENDER_DIR}/${svc}.yaml"
+# Primera fase: desplegar service-discovery PRIMERO (cloud-config depende de esto)
+if [[ -n "${SEEN[service-discovery]:-}" ]]; then
+  if [[ -z "${SERVICE_PORTS[service-discovery]+_}" ]]; then
+    log_error "Servicio 'service-discovery' no está soportado por el pipeline."
+    exit 1
   fi
-done
+  render_manifest "service-discovery"
+  log_info "Aplicando servicio crítico (PRIMERO): service-discovery..."
+  kubectl --namespace "${K8S_NAMESPACE}" apply -f "${RENDER_DIR}/service-discovery.yaml"
+  
+  log_info "Esperando rollout de service-discovery (dependencia crítica)..."
+  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/service-discovery" --timeout="300s"; then
+    log_error "El servicio service-discovery no alcanzó el estado Ready dentro del tiempo esperado."
+    log_info "Estado de pods para service-discovery:"
+    kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="service-discovery" -o wide
+    log_info "Eventos del deployment service-discovery:"
+    kubectl --namespace "${K8S_NAMESPACE}" describe deployment "service-discovery" | grep -A 20 "Events:" || true
+    log_info "Logs del contenedor:"
+    kubectl --namespace "${K8S_NAMESPACE}" logs -l app="service-discovery" --tail=50 2>/dev/null || true
+    log_error "Disponibilidad de recursos en cluster:"
+    kubectl top nodes 2>/dev/null || log_warn "No hay métrica de recursos disponible"
+    exit 1
+  fi
+  log_success "service-discovery está listo."
+fi
 
-# Esperar a que los servicios críticos estén listos
-for svc in "${CRITICAL_SERVICES[@]}"; do
-  if [[ -n "${SEEN[${svc}]:-}" ]]; then
-    log_info "Esperando rollout de servicio crítico: ${svc}..."
-    # Con recursos muy bajos, necesitamos un timeout más largo (5 minutos)
-    if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="300s"; then
-      log_error "El servicio crítico ${svc} no alcanzó el estado Ready dentro del tiempo esperado."
-      
-      # Mostrar información detallada de debugging
-      log_info "Estado de pods para ${svc}:"
-      kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="${svc}" -o wide
-      
-      log_info "Eventos del deployment ${svc}:"
-      kubectl --namespace "${K8S_NAMESPACE}" describe deployment "${svc}" | grep -A 20 "Events:" || true
-      
-      log_info "Descripción de pods (buscando problemas de Pending):"
-      PENDING_PODS=$(kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="${svc}" -o jsonpath='{.items[?(@.status.phase=="Pending")].metadata.name}')
-      if [[ -n "${PENDING_PODS}" ]]; then
-        for pod in ${PENDING_PODS}; do
-          log_error "Pod ${pod} está en Pending. Razón:"
-          kubectl --namespace "${K8S_NAMESPACE}" describe pod "${pod}" | grep -A 10 "Events:" || true
-        done
-      fi
-      
-      log_info "Logs del contenedor:"
-      kubectl --namespace "${K8S_NAMESPACE}" logs -l app="${svc}" --tail=50 2>/dev/null || true
-      
-      log_error "Disponibilidad de recursos en cluster:"
-      kubectl top nodes 2>/dev/null || log_warn "No hay métrica de recursos disponible (metrics-server no instalado)"
-      
-      exit 1
-    fi
-    log_success "${svc} está listo."
+# Segunda fase (después de service-discovery): desplegar cloud-config
+if [[ -n "${SEEN[cloud-config]:-}" ]]; then
+  if [[ -z "${SERVICE_PORTS[cloud-config]+_}" ]]; then
+    log_error "Servicio 'cloud-config' no está soportado por el pipeline."
+    exit 1
   fi
-done
+  render_manifest "cloud-config"
+  log_info "Aplicando servicio crítico (SEGUNDO): cloud-config (después de service-discovery)..."
+  kubectl --namespace "${K8S_NAMESPACE}" apply -f "${RENDER_DIR}/cloud-config.yaml"
+  
+  log_info "Esperando rollout de cloud-config..."
+  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/cloud-config" --timeout="300s"; then
+    log_error "El servicio cloud-config no alcanzó el estado Ready dentro del tiempo esperado."
+    log_info "Estado de pods para cloud-config:"
+    kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="cloud-config" -o wide
+    log_info "Eventos del deployment cloud-config:"
+    kubectl --namespace "${K8S_NAMESPACE}" describe deployment "cloud-config" | grep -A 20 "Events:" || true
+    log_info "Logs del contenedor:"
+    kubectl --namespace "${K8S_NAMESPACE}" logs -l app="cloud-config" --tail=50 2>/dev/null || true
+    log_error "Disponibilidad de recursos en cluster:"
+    kubectl top nodes 2>/dev/null || log_warn "No hay métrica de recursos disponible"
+    exit 1
+  fi
+  log_success "cloud-config está listo."
+fi
 
 log_info "Servicios críticos listos. Desplegando servicios restantes..."
 sleep 5
