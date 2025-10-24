@@ -1,8 +1,11 @@
 
 server:
   port: 9296
+  shutdown: graceful
 
 spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
   zipkin:
     base-url: ${SPRING_ZIPKIN_BASE_URL:http://localhost:9411/}
   application:
@@ -12,6 +15,8 @@ spring:
       server:
         native:
           searchLocations: classpath:/configs
+  jmx:
+    enabled: false
 
 resilience4j:
   circuitbreaker:

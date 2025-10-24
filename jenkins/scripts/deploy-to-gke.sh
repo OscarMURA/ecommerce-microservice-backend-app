@@ -192,6 +192,18 @@ render_manifest() {
   local replicas="${SERVICE_REPLICAS[${svc}]:-${K8S_DEFAULT_REPLICAS}}"
   local manifest="${RENDER_DIR}/${svc}.yaml"
   local extra_env_block=""
+  local cpu_request="100m"
+  local cpu_limit="500m"
+  local mem_request="256Mi"
+  local mem_limit="512Mi"
+
+  # Asignar más recursos a servicios específicos
+  if [[ "${svc}" == "cloud-config" || "${svc}" == "service-discovery" ]]; then
+    cpu_request="200m"
+    cpu_limit="1000m"
+    mem_request="512Mi"
+    mem_limit="1Gi"
+  fi
 
   if [[ "${svc}" == "cloud-config" ]]; then
     local active_profiles="native"
@@ -257,23 +269,23 @@ ${extra_env_block}
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 10
-            failureThreshold: 6
+            failureThreshold: 10
           livenessProbe:
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 60
+            initialDelaySeconds: 90
             periodSeconds: 20
             failureThreshold: 6
           resources:
             requests:
-              cpu: 100m
-              memory: 256Mi
+              cpu: ${cpu_request}
+              memory: ${mem_request}
             limits:
-              cpu: 500m
-              memory: 512Mi
+              cpu: ${cpu_limit}
+              memory: ${mem_limit}
 ---
 apiVersion: v1
 kind: Service
@@ -296,7 +308,42 @@ EOF
 
 LB_SERVICES=()
 
+# Primera fase: desplegar servicios críticos (cloud-config y service-discovery)
+CRITICAL_SERVICES=("cloud-config" "service-discovery")
+for svc in "${CRITICAL_SERVICES[@]}"; do
+  if [[ -n "${SEEN[${svc}]:-}" ]]; then
+    if [[ -z "${SERVICE_PORTS[${svc}]+_}" ]]; then
+      log_error "Servicio '${svc}' no está soportado por el pipeline."
+      exit 1
+    fi
+    render_manifest "${svc}"
+    log_info "Aplicando servicio crítico: ${svc}..."
+    kubectl --namespace "${K8S_NAMESPACE}" apply -f "${RENDER_DIR}/${svc}.yaml"
+  fi
+done
+
+# Esperar a que los servicios críticos estén listos
+for svc in "${CRITICAL_SERVICES[@]}"; do
+  if [[ -n "${SEEN[${svc}]:-}" ]]; then
+    log_info "Esperando rollout de servicio crítico: ${svc}..."
+    if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="600s"; then
+      log_error "El servicio crítico ${svc} no alcanzó el estado Ready dentro del tiempo esperado."
+      kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="${svc}"
+      kubectl --namespace "${K8S_NAMESPACE}" logs -l app="${svc}" --tail=50 || true
+      exit 1
+    fi
+    log_success "${svc} está listo."
+  fi
+done
+
+log_info "Servicios críticos listos. Desplegando servicios restantes..."
+sleep 5
+
+# Segunda fase: desplegar el resto de los servicios
 for svc in "${SERVICES[@]}"; do
+  if [[ "${svc}" == "cloud-config" || "${svc}" == "service-discovery" ]]; then
+    continue  # Ya fueron desplegados
+  fi
   if [[ -z "${SERVICE_PORTS[${svc}]+_}" ]]; then
     log_error "Servicio '${svc}' no está soportado por el pipeline."
     exit 1

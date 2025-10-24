@@ -7,7 +7,18 @@ eureka:
   client:
     register-with-eureka: true
     fetch-registry: true
+    healthcheck:
+      enabled: true
+    registry-fetch-interval-seconds: 30
+    instance-info-replication-interval-seconds: 40
+    initial-instance-info-replication-interval-seconds: 40
     service-url:
-      defaultZone: ${EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:http://localhost:8761/eureka}
+      defaultZone: ${EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:http://service-discovery:8761/eureka}
   instance:
-    hostname: ${EUREKA_INSTANCE:localhost}
+    hostname: ${EUREKA_INSTANCE:cloud-config}
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 30
+    lease-expiration-duration-in-seconds: 90
+    status-page-url: http://${eureka.instance.hostname}:9296/actuator/info
+    health-check-url: http://${eureka.instance.hostname}:9296/actuator/health
+
