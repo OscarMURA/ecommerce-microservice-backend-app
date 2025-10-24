@@ -420,10 +420,15 @@ for svc in "${SERVICES[@]}"; do
 done
 
 for svc in "${SERVICES[@]}"; do
+  # Saltar servicios críticos que ya fueron esperados en fase 1
+  if [[ "${svc}" == "cloud-config" || "${svc}" == "service-discovery" ]]; then
+    continue
+  fi
+  
   log_info "Esperando rollout de ${svc}..."
-  # Timeout más corto para segunda fase (2 minutos)
-  TIMEOUT="${K8S_ROLLOUT_TIMEOUT:-120}"
-  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="${TIMEOUT}s"; then
+  # Todos los servicios necesitan 400s debido a inicialización lenta de Spring Boot
+  TIMEOUT="400s"
+  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="${TIMEOUT}"; then
     log_error "El despliegue de ${svc} no alcanzó el estado Ready dentro del tiempo esperado."
     log_info "Estado actual de pods:"
     kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="${svc}" -o wide
