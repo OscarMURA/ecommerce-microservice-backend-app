@@ -142,6 +142,20 @@ fi
 
 log_info "Servicios a desplegar: ${SERVICES[*]}"
 
+# Limpiar replicasets viejos que puedan estar en CrashLoopBackOff
+log_info "Limpiando replicasets viejos que puedan causar problemas..."
+for svc in "${SERVICES[@]}"; do
+  # Obtener todos los replicasets del servicio
+  OLD_RS=$(kubectl --namespace "${K8S_NAMESPACE}" get rs -l app="${svc}" --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[:-1].metadata.name}' 2>/dev/null || true)
+  if [[ -n "${OLD_RS}" ]]; then
+    for rs in ${OLD_RS}; do
+      log_info "Eliminando replicaset viejo: ${rs}"
+      kubectl --namespace "${K8S_NAMESPACE}" delete rs "${rs}" --cascade=background 2>/dev/null || true
+    done
+  fi
+done
+log_success "Limpieza de replicasets completada."
+
 BASE_MANIFEST_DIR="${INFRA_REPO_DIR}/kubernetes/manifests"
 if [[ -d "${BASE_MANIFEST_DIR}" ]]; then
   for base in namespace.yaml configmap.yaml; do
@@ -270,18 +284,18 @@ ${extra_env_block}
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 180
-            periodSeconds: 15
-            failureThreshold: 8
-            timeoutSeconds: 10
+            initialDelaySeconds: 300
+            periodSeconds: 10
+            failureThreshold: 10
+            timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 240
+            initialDelaySeconds: 360
             periodSeconds: 30
             failureThreshold: 3
-            timeoutSeconds: 10
+            timeoutSeconds: 5
           resources:
             requests:
               cpu: ${cpu_request}
