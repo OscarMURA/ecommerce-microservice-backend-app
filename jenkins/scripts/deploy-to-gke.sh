@@ -192,17 +192,17 @@ render_manifest() {
   local replicas="${SERVICE_REPLICAS[${svc}]:-${K8S_DEFAULT_REPLICAS}}"
   local manifest="${RENDER_DIR}/${svc}.yaml"
   local extra_env_block=""
-  local cpu_request="100m"
-  local cpu_limit="500m"
-  local mem_request="256Mi"
-  local mem_limit="512Mi"
+  local cpu_request="50m"
+  local cpu_limit="250m"
+  local mem_request="128Mi"
+  local mem_limit="256Mi"
 
   # Asignar más recursos a servicios específicos
   if [[ "${svc}" == "cloud-config" || "${svc}" == "service-discovery" ]]; then
-    cpu_request="200m"
-    cpu_limit="1000m"
-    mem_request="512Mi"
-    mem_limit="1Gi"
+    cpu_request="100m"
+    cpu_limit="500m"
+    mem_request="256Mi"
+    mem_limit="512Mi"
   fi
 
   if [[ "${svc}" == "cloud-config" ]]; then
@@ -269,16 +269,23 @@ ${extra_env_block}
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 60
+            initialDelaySeconds: 30
             periodSeconds: 10
-            failureThreshold: 10
+            failureThreshold: 6
           livenessProbe:
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: 90
+            initialDelaySeconds: 60
             periodSeconds: 20
-            failureThreshold: 6
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: ${cpu_request}
+              memory: ${mem_request}
+            limits:
+              cpu: ${cpu_limit}
+              memory: ${mem_limit}
           resources:
             requests:
               cpu: ${cpu_request}
@@ -308,6 +315,15 @@ EOF
 
 LB_SERVICES=()
 
+# Verificar que hay nodos disponibles antes de desplegar
+log_info "Verificando disponibilidad de nodos del cluster..."
+AVAILABLE_NODES=$(kubectl get nodes --no-headers 2>/dev/null | wc -l)
+if [[ "${AVAILABLE_NODES}" -eq 0 ]]; then
+  log_error "No hay nodos disponibles en el cluster ${GKE_CLUSTER_NAME}"
+  exit 1
+fi
+log_info "Nodos disponibles: ${AVAILABLE_NODES}"
+
 # Primera fase: desplegar servicios críticos (cloud-config y service-discovery)
 CRITICAL_SERVICES=("cloud-config" "service-discovery")
 for svc in "${CRITICAL_SERVICES[@]}"; do
@@ -328,8 +344,29 @@ for svc in "${CRITICAL_SERVICES[@]}"; do
     log_info "Esperando rollout de servicio crítico: ${svc}..."
     if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="600s"; then
       log_error "El servicio crítico ${svc} no alcanzó el estado Ready dentro del tiempo esperado."
-      kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="${svc}"
-      kubectl --namespace "${K8S_NAMESPACE}" logs -l app="${svc}" --tail=50 || true
+      
+      # Mostrar información detallada de debugging
+      log_info "Estado de pods para ${svc}:"
+      kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="${svc}" -o wide
+      
+      log_info "Eventos del deployment ${svc}:"
+      kubectl --namespace "${K8S_NAMESPACE}" describe deployment "${svc}" | grep -A 20 "Events:" || true
+      
+      log_info "Descripción de pods (buscando problemas de Pending):"
+      PENDING_PODS=$(kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="${svc}" -o jsonpath='{.items[?(@.status.phase=="Pending")].metadata.name}')
+      if [[ -n "${PENDING_PODS}" ]]; then
+        for pod in ${PENDING_PODS}; do
+          log_error "Pod ${pod} está en Pending. Razón:"
+          kubectl --namespace "${K8S_NAMESPACE}" describe pod "${pod}" | grep -A 10 "Events:" || true
+        done
+      fi
+      
+      log_info "Logs del contenedor:"
+      kubectl --namespace "${K8S_NAMESPACE}" logs -l app="${svc}" --tail=50 2>/dev/null || true
+      
+      log_error "Disponibilidad de recursos en cluster:"
+      kubectl top nodes 2>/dev/null || log_warn "No hay métrica de recursos disponible (metrics-server no instalado)"
+      
       exit 1
     fi
     log_success "${svc} está listo."
@@ -360,7 +397,18 @@ for svc in "${SERVICES[@]}"; do
   log_info "Esperando rollout de ${svc}..."
   if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="${K8S_ROLLOUT_TIMEOUT}s"; then
     log_error "El despliegue de ${svc} no alcanzó el estado Ready dentro del tiempo esperado."
-    kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="${svc}"
+    log_info "Estado actual de pods:"
+    kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="${svc}" -o wide
+    
+    # Debugging adicional para Pending pods
+    PENDING_PODS=$(kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="${svc}" -o jsonpath='{.items[?(@.status.phase=="Pending")].metadata.name}')
+    if [[ -n "${PENDING_PODS}" ]]; then
+      for pod in ${PENDING_PODS}; do
+        log_warn "Pod ${pod} está en Pending. Describiendo..."
+        kubectl --namespace "${K8S_NAMESPACE}" describe pod "${pod}" | grep -A 5 "Events:" || true
+      done
+    fi
+    
     exit 1
   fi
   log_success "${svc} desplegado correctamente."
