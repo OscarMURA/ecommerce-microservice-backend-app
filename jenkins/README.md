@@ -6,6 +6,15 @@ Este directorio contiene los pipelines declarativos utilizados para automatizar 
 
 Este pipeline vive en el repositorio `infra-ecommerce-microservice-backend-app` y se encarga de crear la VM en DigitalOcean. El pipeline `Jenkins_Dev` depende de él para garantizar que exista un ambiente donde ejecutar las pruebas.
 
+### Parámetros relevantes
+
+| Parámetro | Descripción | Valor por defecto |
+|-----------|-------------|-------------------|
+| `ACTION` | `create`, `rebuild`, `destroy` o `status` | `create` |
+| `CONFIGURE_GCP_ACCESS` | Si está en `true`, copia la credencial `gcp-service-account` a la VM recién creada, ejecuta `gcloud auth activate-service-account`, fija el proyecto (`gcp-project-id`) y deja configurados los registros `us-docker.pkg.dev` y `gcr.io` para Docker | `true` |
+
+> Para que esta etapa funcione necesitas, además de `digitalocean-token` y `integration-vm-password`, las credenciales `gcp-project-id` (Secret Text) y `gcp-service-account` (Secret file) dadas de alta en Jenkins. Si prefieres gestionar las credenciales manualmente en la VM, ejecuta el job con `CONFIGURE_GCP_ACCESS=false`.
+
 ## Jenkins_Dev.groovy
 
 Pipeline pensado para un Job de Jenkins que:
@@ -50,7 +59,7 @@ Pipeline pensado para un Job de Jenkins que:
 | `K8S_IMAGE_REGISTRY` | Prefijo del registro donde se publican las imágenes Docker | `us-docker.pkg.dev/devops-activity/app-images` |
 | `K8S_IMAGE_TAG` | Tag de imagen a desplegar (vacío usa `GIT_COMMIT[0..6]`) | `` |
 | `INFRA_REPO_URL` | Repositorio Git con manifiestos/base de infraestructura | `https://github.com/OscarMURA/infra-ecommerce-microservice-backend-app.git` |
-| `INFRA_REPO_BRANCH` | Rama del repositorio de infraestructura | `main` |
+| `INFRA_REPO_BRANCH` | Rama del repositorio de infraestructura | `infra/master` |
 
 #### Parámetros para Kubernetes
 
