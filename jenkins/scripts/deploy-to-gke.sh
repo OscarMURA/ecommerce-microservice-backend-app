@@ -224,13 +224,13 @@ metadata:
   name: ${svc}
   namespace: ${K8S_NAMESPACE}
   labels:
-    app: ${svc}
-    environment: ${K8S_ENVIRONMENT}
-    app.kubernetes.io/name: ${svc}
-    app.kubernetes.io/part-of: ecommerce-platform
-    app.kubernetes.io/managed-by: jenkins
-    app.kubernetes.io/version: ${K8S_IMAGE_TAG}
-    app.kubernetes.io/instance: ${svc}-${K8S_ENVIRONMENT}
+    app: "${svc}"
+    environment: "${K8S_ENVIRONMENT}"
+    app.kubernetes.io/name: "${svc}"
+    app.kubernetes.io/part-of: "ecommerce-platform"
+    app.kubernetes.io/managed-by: "jenkins"
+    app.kubernetes.io/version: "${K8S_IMAGE_TAG}"
+    app.kubernetes.io/instance: "${svc}-${K8S_ENVIRONMENT}"
   annotations:
     jenkins.io/job: "${JOB_NAME:-unknown}"
     jenkins.io/build-number: "${BUILD_NUMBER:-0}"
@@ -239,14 +239,14 @@ spec:
   replicas: ${replicas}
   selector:
     matchLabels:
-      app: ${svc}
+      app: "${svc}"
   template:
     metadata:
       labels:
-        app: ${svc}
-        environment: ${K8S_ENVIRONMENT}
-        app.kubernetes.io/name: ${svc}
-        app.kubernetes.io/instance: ${svc}-${K8S_ENVIRONMENT}
+        app: "${svc}"
+        environment: "${K8S_ENVIRONMENT}"
+        app.kubernetes.io/name: "${svc}"
+        app.kubernetes.io/instance: "${svc}-${K8S_ENVIRONMENT}"
     spec:
       imagePullSecrets:
         - name: docker-registry-secret
@@ -296,11 +296,11 @@ metadata:
   name: ${svc}
   namespace: ${K8S_NAMESPACE}
   labels:
-    app: ${svc}
-    environment: ${K8S_ENVIRONMENT}
+    app: "${svc}"
+    environment: "${K8S_ENVIRONMENT}"
 spec:
   selector:
-    app: ${svc}
+    app: "${svc}"
   type: ${service_type}
   ports:
     - name: http
