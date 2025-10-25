@@ -260,6 +260,13 @@ render_manifest() {
     READINESS_FAILURE_THRESHOLD="80"
     LIVENESS_INITIAL_DELAY="300"
     LIVENESS_FAILURE_THRESHOLD="10"
+  elif [[ "${svc}" == "api-gateway" ]]; then
+    # API Gateway necesita mucho tiempo porque espera a conectarse a cloud-config
+    # Aunque cloud-config sea opcional, Spring Config intenta varias veces antes de continuar
+    READINESS_INITIAL_DELAY="200"
+    READINESS_FAILURE_THRESHOLD="100"
+    LIVENESS_INITIAL_DELAY="360"
+    LIVENESS_FAILURE_THRESHOLD="15"
   else
     # Otros servicios: dar 120+ segundos para que terminen la inicialización
     READINESS_INITIAL_DELAY="130"
@@ -495,8 +502,40 @@ fi
   fi
 
 log_info "Servicios críticos listos. Desplegando servicios restantes..."
-# Espera adicional para asegurar que cloud-config esté 100% estable antes de desplegar otros servicios
-log_info "⏳ Esperando 30s adicionales para estabilización del cluster..."
+# Espera adicional CRÍTICA para asegurar que cloud-config esté 100% estable
+# y que el Service DNS esté completamente propagado en el cluster
+log_info "⏳ Esperando 60s adicionales para propagación de Service DNS..."
+sleep 60
+
+# Verificación ADICIONAL: Probar que el Service de cloud-config responde desde otro pod
+log_info "Verificando que el Service de cloud-config sea accesible vía DNS..."
+VERIFICATION_POD=""
+
+# Usar el pod de service-discovery para verificar (ya está running)
+VERIFICATION_POD=$(kubectl --namespace "${K8S_NAMESPACE}" get pod -l app="service-discovery" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+if [[ -n "${VERIFICATION_POD}" ]]; then
+  log_info "Probando conectividad desde ${VERIFICATION_POD} → cloud-config:9296..."
+  
+  # Intentar hasta 10 veces (50 segundos)
+  for i in {1..10}; do
+    if kubectl --namespace "${K8S_NAMESPACE}" exec "${VERIFICATION_POD}" -- curl -sf -m 5 http://cloud-config:9296/actuator/health > /dev/null 2>&1; then
+      log_success "✅ Service de cloud-config es accesible vía DNS desde otros pods."
+      break
+    else
+      if [[ $i -eq 10 ]]; then
+        log_warn "⚠️  No se pudo verificar Service DNS después de 10 intentos. Continuando de todas formas..."
+      else
+        log_info "Intento $i/10 falló, reintentando en 5s..."
+        sleep 5
+      fi
+    fi
+  done
+else
+  log_warn "No se encontró pod de verificación, saltando verificación de Service DNS."
+fi
+
+log_info "⏳ Esperando 30s finales antes de desplegar servicios dependientes..."
 sleep 30
 
 # NOTE: Ya NO necesitamos verificar el puerto 9296 porque:
@@ -530,6 +569,13 @@ for svc in "${SERVICES[@]}"; do
   log_info "Esperando rollout de ${svc}..."
   # Timeout ajustado para permitir que los probes tengan suficiente tiempo (130s initial + margin)
   TIMEOUT="480s"
+  
+  # API Gateway necesita más tiempo porque tiene initialDelaySeconds=200s + reintentos de conexión a cloud-config
+  if [[ "${svc}" == "api-gateway" ]]; then
+    TIMEOUT="720s"  # 12 minutos: 200s initial + 100 failures * 5s = ~700s max
+    log_info "⚠️  api-gateway requiere más tiempo (${TIMEOUT}) debido a dependencia con cloud-config"
+  fi
+  
   if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="${TIMEOUT}"; then
     log_error "El despliegue de ${svc} no alcanzó el estado Ready dentro del tiempo esperado."
     log_info "Estado actual de pods:"
