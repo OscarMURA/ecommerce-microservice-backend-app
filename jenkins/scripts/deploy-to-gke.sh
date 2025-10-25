@@ -244,15 +244,26 @@ render_manifest() {
     mem_limit="256Mi"
   fi
 
-  # Probes específicas para cloud-config: más conservador porque otros servicios dependen de él
+  # Probes específicas: dar mucho más tiempo para inicialización de beans Spring
+  # Los servicios tardan 90-120 segundos en completar la inicialización del contexto
+  # inicialDelaySeconds: esperar antes de la primera prueba (debe ser >= startup time)
+  # failureThreshold: número de fallos antes de marcar como NOT Ready
   if [[ "${svc}" == "cloud-config" ]]; then
-    CLOUD_CONFIG_READINESS_INITIAL_DELAY="180"
+    # Cloud-config es crítico y tarda más
+    CLOUD_CONFIG_READINESS_INITIAL_DELAY="150"
     CLOUD_CONFIG_READINESS_FAILURE_THRESHOLD="100"
     CLOUD_CONFIG_LIVENESS_INITIAL_DELAY="300"
     CLOUD_CONFIG_LIVENESS_FAILURE_THRESHOLD="15"
+  elif [[ "${svc}" == "service-discovery" ]]; then
+    # Service discovery también es crítico
+    CLOUD_CONFIG_READINESS_INITIAL_DELAY="140"
+    CLOUD_CONFIG_READINESS_FAILURE_THRESHOLD="80"
+    CLOUD_CONFIG_LIVENESS_INITIAL_DELAY="300"
+    CLOUD_CONFIG_LIVENESS_FAILURE_THRESHOLD="10"
   else
-    CLOUD_CONFIG_READINESS_INITIAL_DELAY="120"
-    CLOUD_CONFIG_READINESS_FAILURE_THRESHOLD="50"
+    # Otros servicios: dar 120+ segundos para que terminen la inicialización
+    CLOUD_CONFIG_READINESS_INITIAL_DELAY="130"
+    CLOUD_CONFIG_READINESS_FAILURE_THRESHOLD="60"
     CLOUD_CONFIG_LIVENESS_INITIAL_DELAY="300"
     CLOUD_CONFIG_LIVENESS_FAILURE_THRESHOLD="10"
   fi
