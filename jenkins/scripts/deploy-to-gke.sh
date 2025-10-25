@@ -236,12 +236,25 @@ render_manifest() {
   local mem_request="96Mi"
   local mem_limit="192Mi"
 
-  # Asignar ligeramente más recursos a servicios críticos (pero todavía muy bajos)
-  if [[ "${svc}" == "cloud-config" || "${svc}" == "service-discovery" ]]; then
+  # Asignar recursos específicos según las necesidades de cada servicio
+  if [[ "${svc}" == "cloud-config" ]]; then
+    # cloud-config necesita más memoria para evitar OOMKilled
+    cpu_request="50m"
+    cpu_limit="200m"
+    mem_request="256Mi"
+    mem_limit="512Mi"
+  elif [[ "${svc}" == "service-discovery" ]]; then
+    # service-discovery es crítico pero más ligero
     cpu_request="25m"
     cpu_limit="150m"
     mem_request="128Mi"
     mem_limit="256Mi"
+  elif [[ "${svc}" == "api-gateway" ]]; then
+    # api-gateway necesita recursos significativos para manejar tráfico y evitar OOMKilled
+    cpu_request="100m"
+    cpu_limit="500m"
+    mem_request="256Mi"
+    mem_limit="1Gi"
   fi
 
   # Probes específicas: dar mucho más tiempo para inicialización de beans Spring
