@@ -482,6 +482,10 @@ fi
       if [[ "${VERIFIED}" != "true" ]]; then
         log_warn "⚠️  No se pudo verificar puerto 9296 después de ${MAX_WAIT_TIME}s, continuando de todas formas..."
         sleep 30  # Espera mínima antes de continuar
+      else
+        # Si la verificación fue exitosa, esperar tiempo adicional para estabilización
+        log_info "⏳ Esperando 60s adicionales para que ConfigServer se estabilice completamente..."
+        sleep 60
       fi
     fi
     
