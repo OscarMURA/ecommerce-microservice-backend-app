@@ -408,48 +408,20 @@ fi
     fi
     
     # ESPERA ADICIONAL: cloud-config puede reportar healthy pero no estar listo para recibir requests
-    log_info "⏳ Espera adicional (60s) para que cloud-config stabilice su puerto 9296..."
-    sleep 60
+    # cloud-config necesita más tiempo para abrir el puerto 9296 internamente
+    log_info "⏳ Espera adicional (120s) para que cloud-config stabilice su puerto 9296..."
+    sleep 120
     
-    # Verificar que el puerto 9296 esté realmente ABIERTO (usando curl)
-    log_info "✓ Verificando que puerto 9296 esté escuchando..."
-    CLOUD_CONFIG_POD=$(kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="cloud-config" -o jsonpath='{.items[0].metadata.name}')
-    if [[ -n "${CLOUD_CONFIG_POD}" ]]; then
-      if kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- curl -s -m 3 http://localhost:9296/actuator/health 2>/dev/null | grep -q '"status":"UP"'; then
-        log_success "✓ Puerto 9296 está abierto y respondiendo"
-      else
-        log_warn "⚠ Puerto 9296 aún puede no estar completamente listo"
-      fi
-    fi
-    
-    log_success "cloud-config está listo."
+    log_success "cloud-config espera completada."
   fi
 
 log_info "Servicios críticos listos. Desplegando servicios restantes..."
 sleep 5
 
-# Verificación FINAL antes de desplegar api-gateway
-# Con fail-fast: false, los servicios ya no dependen de cloud-config para arrancar
-log_info "🔍 Verificación pre-despliegue: verificando disponibilidad de servicios..."
-CLOUD_CONFIG_POD=$(kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="cloud-config" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-if [[ -n "${CLOUD_CONFIG_POD}" ]]; then
-  RETRY=0
-  MAX_RETRY=5
-  while [[ $RETRY -lt $MAX_RETRY ]]; do
-    if kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- curl -s -m 3 http://localhost:9296/actuator/health 2>/dev/null | grep -q '"status":"UP"'; then
-      log_success "✓ cloud-config Puerto 9296 está disponible"
-      break
-    fi
-    RETRY=$((RETRY + 1))
-    if [[ $RETRY -lt $MAX_RETRY ]]; then
-      log_info "  Reintentando verificación de puerto 9296 ($RETRY/$MAX_RETRY)..."
-      sleep 5
-    fi
-  done
-  if [[ $RETRY -eq $MAX_RETRY ]]; then
-    log_warn "⚠️  cloud-config puerto 9296 no disponible, pero continuando (los servicios usan fail-fast: false)"
-  fi
-fi
+# NOTE: Ya NO necesitamos verificar el puerto 9296 porque:
+# 1. Los servicios usan fail-fast: false (opcional config-server)
+# 2. Esperamos suficiente tiempo (120s) para que cloud-config esté listo
+# 3. Si cloud-config falla, los servicios usan configuración embebida
 
 # Segunda fase: desplegar el resto de los servicios
 for svc in "${SERVICES[@]}"; do
