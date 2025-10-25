@@ -421,7 +421,9 @@ fi
     fi
     
     log_success "cloud-config está listo."
-  filog_info "Servicios críticos listos. Desplegando servicios restantes..."
+  fi
+
+log_info "Servicios críticos listos. Desplegando servicios restantes..."
 sleep 5
 
 # Verificación FINAL antes de desplegar api-gateway
