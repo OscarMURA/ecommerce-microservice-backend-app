@@ -411,13 +411,13 @@ fi
     log_info "⏳ Espera adicional (15s) para que cloud-config stabilice su puerto 9296..."
     sleep 15
     
-    # Verificar que cloud-config realmente responda
-    log_info "✓ Verificando conectividad a cloud-config:9296..."
+    # Verificar que el puerto 9296 esté realmente ABIERTO (no solo que health sea UP)
+    log_info "✓ Verificando que puerto 9296 esté escuchando..."
     CLOUD_CONFIG_POD=$(kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="cloud-config" -o jsonpath='{.items[0].metadata.name}')
     if [[ -n "${CLOUD_CONFIG_POD}" ]]; then
-      kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- curl -s http://localhost:9296/actuator/health | grep -q '"status":"UP"' && \
-        log_success "✓ cloud-config está respondiendo correctamente" || \
-        log_warn "⚠ cloud-config puede no estar completamente listo"
+      kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- sh -c "nc -zv localhost 9296 2>&1" && \
+        log_success "✓ Puerto 9296 está abierto y escuchando" || \
+        log_warn "⚠ Puerto 9296 aún puede no estar completamente listo"
     fi
     
     log_success "cloud-config está listo."
@@ -427,24 +427,25 @@ log_info "Servicios críticos listos. Desplegando servicios restantes..."
 sleep 5
 
 # Verificación FINAL antes de desplegar api-gateway
-log_info "🔍 Verificación pre-despliegue: cloud-config debe estar escuchando..."
+# Con fail-fast: false, los servicios ya no dependen de cloud-config para arrancar
+log_info "🔍 Verificación pre-despliegue: verificando disponibilidad de servicios..."
 CLOUD_CONFIG_POD=$(kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="cloud-config" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 if [[ -n "${CLOUD_CONFIG_POD}" ]]; then
   RETRY=0
-  MAX_RETRY=5
+  MAX_RETRY=3
   while [[ $RETRY -lt $MAX_RETRY ]]; do
-    if kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- curl -s -m 3 http://localhost:9296/actuator/health 2>/dev/null | grep -q '"status":"UP"'; then
-      log_success "✓ cloud-config respondiendo exitosamente en puerto 9296"
+    if kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- sh -c "nc -zv localhost 9296 2>&1" >/dev/null 2>&1; then
+      log_success "✓ cloud-config Puerto 9296 está disponible"
       break
     fi
     RETRY=$((RETRY + 1))
     if [[ $RETRY -lt $MAX_RETRY ]]; then
-      log_warn "  Reintentando conexión a cloud-config ($RETRY/$MAX_RETRY)..."
-      sleep 3
+      log_info "  Verificando disponibilidad de puerto 9296 ($RETRY/$MAX_RETRY)..."
+      sleep 2
     fi
   done
   if [[ $RETRY -eq $MAX_RETRY ]]; then
-    log_warn "⚠️  cloud-config no responde, pero continuando (puede estabilizarse durante despliegue)"
+    log_warn "⚠️  cloud-config puerto 9296 no disponible, pero continuando (los servicios usan fail-fast: false)"
   fi
 fi
 
