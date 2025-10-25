@@ -108,6 +108,14 @@ declare -A SERVICE_TYPES=(
 declare -A SERVICE_HEALTH_PATH=(
   [service-discovery]="/actuator/health"
   [cloud-config]="/actuator/health"
+  [api-gateway]="/actuator/health"
+  [proxy-client]="/actuator/health"
+  [user-service]="/actuator/health"
+  [product-service]="/actuator/health"
+  [favourite-service]="/actuator/health"
+  [order-service]="/actuator/health"
+  [shipping-service]="/actuator/health"
+  [payment-service]="/actuator/health"
 )
 
 declare -A SERVICE_REPLICAS=(
@@ -300,24 +308,23 @@ ${extra_env_block}
                 name: ecommerce-config
             - secretRef:
                 name: ecommerce-secrets
-          # Probes deshabilitadas temporalmente para api-gateway
-          # (diagnosticar por qué no pasa health check)
+          # Readiness and Liveness probes para verificar que el servicio está listo
           readinessProbe:
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: ${CLOUD_CONFIG_READINESS_INITIAL_DELAY:-120}
+            initialDelaySeconds: ${READINESS_INITIAL_DELAY:-90}
             periodSeconds: 5
-            failureThreshold: ${CLOUD_CONFIG_READINESS_FAILURE_THRESHOLD:-50}
+            failureThreshold: ${READINESS_FAILURE_THRESHOLD:-50}
             timeoutSeconds: 3
             successThreshold: 1
           livenessProbe:
             httpGet:
               path: ${health_path}
               port: http
-            initialDelaySeconds: ${CLOUD_CONFIG_LIVENESS_INITIAL_DELAY:-300}
+            initialDelaySeconds: ${LIVENESS_INITIAL_DELAY:-300}
             periodSeconds: 30
-            failureThreshold: ${CLOUD_CONFIG_LIVENESS_FAILURE_THRESHOLD:-10}
+            failureThreshold: ${LIVENESS_FAILURE_THRESHOLD:-10}
             timeoutSeconds: 3
           resources:
             requests:
