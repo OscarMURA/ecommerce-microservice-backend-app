@@ -12,6 +12,7 @@ spring:
     name: CLOUD-CONFIG
   cloud:
     config:
+      enabled: false  # Deshabilitar Config Client - cloud-config no debe conectarse a sí mismo
       server:
         native:
           searchLocations: classpath:/configs
