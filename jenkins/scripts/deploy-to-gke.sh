@@ -408,16 +408,18 @@ fi
     fi
     
     # ESPERA ADICIONAL: cloud-config puede reportar healthy pero no estar listo para recibir requests
-    log_info "⏳ Espera adicional (15s) para que cloud-config stabilice su puerto 9296..."
-    sleep 15
+    log_info "⏳ Espera adicional (60s) para que cloud-config stabilice su puerto 9296..."
+    sleep 60
     
-    # Verificar que el puerto 9296 esté realmente ABIERTO (no solo que health sea UP)
+    # Verificar que el puerto 9296 esté realmente ABIERTO (usando curl)
     log_info "✓ Verificando que puerto 9296 esté escuchando..."
     CLOUD_CONFIG_POD=$(kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="cloud-config" -o jsonpath='{.items[0].metadata.name}')
     if [[ -n "${CLOUD_CONFIG_POD}" ]]; then
-      kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- sh -c "nc -zv localhost 9296 2>&1" && \
-        log_success "✓ Puerto 9296 está abierto y escuchando" || \
+      if kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- curl -s -m 3 http://localhost:9296/actuator/health 2>/dev/null | grep -q '"status":"UP"'; then
+        log_success "✓ Puerto 9296 está abierto y respondiendo"
+      else
         log_warn "⚠ Puerto 9296 aún puede no estar completamente listo"
+      fi
     fi
     
     log_success "cloud-config está listo."
@@ -432,16 +434,16 @@ log_info "🔍 Verificación pre-despliegue: verificando disponibilidad de servi
 CLOUD_CONFIG_POD=$(kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="cloud-config" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 if [[ -n "${CLOUD_CONFIG_POD}" ]]; then
   RETRY=0
-  MAX_RETRY=3
+  MAX_RETRY=5
   while [[ $RETRY -lt $MAX_RETRY ]]; do
-    if kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- sh -c "nc -zv localhost 9296 2>&1" >/dev/null 2>&1; then
+    if kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- curl -s -m 3 http://localhost:9296/actuator/health 2>/dev/null | grep -q '"status":"UP"'; then
       log_success "✓ cloud-config Puerto 9296 está disponible"
       break
     fi
     RETRY=$((RETRY + 1))
     if [[ $RETRY -lt $MAX_RETRY ]]; then
-      log_info "  Verificando disponibilidad de puerto 9296 ($RETRY/$MAX_RETRY)..."
-      sleep 2
+      log_info "  Reintentando verificación de puerto 9296 ($RETRY/$MAX_RETRY)..."
+      sleep 5
     fi
   done
   if [[ $RETRY -eq $MAX_RETRY ]]; then
