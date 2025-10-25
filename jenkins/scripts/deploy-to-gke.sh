@@ -102,22 +102,22 @@ declare -A SERVICE_PORTS=(
 )
 
 # Configuración de tipos de servicio
+declare -A SERVICE_TYPES
 SERVICE_TYPES[api-gateway]="LoadBalancer"
 
 # Rutas de health check para cada servicio (CRÍTICO: usadas por readiness probes)
-# Nota: NO usar 'declare -A' aquí porque interfiere con la expansión en funciones
-# En su lugar, asignar directamente a la variable global
-typeset -A SERVICE_HEALTH_PATH
-SERVICE_HEALTH_PATH[service-discovery]="/actuator/health"
-SERVICE_HEALTH_PATH[cloud-config]="/actuator/health"
-SERVICE_HEALTH_PATH[api-gateway]="/actuator/health"
-SERVICE_HEALTH_PATH[proxy-client]="/actuator/health"
-SERVICE_HEALTH_PATH[user-service]="/actuator/health"
-SERVICE_HEALTH_PATH[product-service]="/actuator/health"
-SERVICE_HEALTH_PATH[favourite-service]="/actuator/health"
-SERVICE_HEALTH_PATH[order-service]="/actuator/health"
-SERVICE_HEALTH_PATH[shipping-service]="/actuator/health"
-SERVICE_HEALTH_PATH[payment-service]="/actuator/health"
+declare -A SERVICE_HEALTH_PATH=(
+  [service-discovery]="/actuator/health"
+  [cloud-config]="/actuator/health"
+  [api-gateway]="/actuator/health"
+  [proxy-client]="/actuator/health"
+  [user-service]="/actuator/health"
+  [product-service]="/actuator/health"
+  [favourite-service]="/actuator/health"
+  [order-service]="/actuator/health"
+  [shipping-service]="/actuator/health"
+  [payment-service]="/actuator/health"
+)
 
 declare -A SERVICE_REPLICAS=(
   [api-gateway]=2
