@@ -457,20 +457,22 @@ fi
       log_warn "No se encontró pod de cloud-config, continuando con espera fija..."
       sleep 120
     else
-      # Hacer port-forward y verificar que el puerto 9296 está accesible
-      log_info "Verificando puerto 9296 en pod: ${CLOUD_CONFIG_POD}..."
+      # Verificar que ConfigServer esté completamente listo para servir requests
+      # No solo que /actuator/health responda, sino que el ConfigServer endpoint específico esté listo
+      log_info "Verificando ConfigServer en pod: ${CLOUD_CONFIG_POD}..."
       ELAPSED=0
       VERIFIED=false
       
       while [[ ${ELAPSED} -lt ${MAX_WAIT_TIME} ]]; do
-        # Test de conectividad al puerto 9296
-        if kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- curl -sf http://localhost:9296/actuator/health > /dev/null 2>&1; then
-          log_success "✅ Puerto 9296 de cloud-config verificado y respondiendo."
+        # Test de conectividad al ConfigServer endpoint específico que usan los clientes
+        # Intentar obtener config para service-discovery como prueba
+        if kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- curl -sf http://localhost:9296/service-discovery/dev > /dev/null 2>&1; then
+          log_success "✅ ConfigServer de cloud-config verificado y respondiendo en puerto 9296."
           VERIFIED=true
           break
         else
           if [[ $((ELAPSED % 30)) -eq 0 ]]; then
-            log_info "⏳ Esperando puerto 9296... (${ELAPSED}s / ${MAX_WAIT_TIME}s)"
+            log_info "⏳ Esperando ConfigServer listo... (${ELAPSED}s / ${MAX_WAIT_TIME}s)"
           fi
           sleep ${RETRY_INTERVAL}
           ELAPSED=$((ELAPSED + RETRY_INTERVAL))
