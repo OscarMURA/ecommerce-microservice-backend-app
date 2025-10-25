@@ -250,22 +250,22 @@ render_manifest() {
   # failureThreshold: número de fallos antes de marcar como NOT Ready
   if [[ "${svc}" == "cloud-config" ]]; then
     # Cloud-config es crítico y tarda más
-    CLOUD_CONFIG_READINESS_INITIAL_DELAY="150"
-    CLOUD_CONFIG_READINESS_FAILURE_THRESHOLD="100"
-    CLOUD_CONFIG_LIVENESS_INITIAL_DELAY="300"
-    CLOUD_CONFIG_LIVENESS_FAILURE_THRESHOLD="15"
+    READINESS_INITIAL_DELAY="150"
+    READINESS_FAILURE_THRESHOLD="100"
+    LIVENESS_INITIAL_DELAY="300"
+    LIVENESS_FAILURE_THRESHOLD="15"
   elif [[ "${svc}" == "service-discovery" ]]; then
-    # Service discovery también es crítico
-    CLOUD_CONFIG_READINESS_INITIAL_DELAY="140"
-    CLOUD_CONFIG_READINESS_FAILURE_THRESHOLD="80"
-    CLOUD_CONFIG_LIVENESS_INITIAL_DELAY="300"
-    CLOUD_CONFIG_LIVENESS_FAILURE_THRESHOLD="10"
+    # Service discovery también es crítico y tarda más por Jersey/Eureka UI
+    READINESS_INITIAL_DELAY="180"
+    READINESS_FAILURE_THRESHOLD="80"
+    LIVENESS_INITIAL_DELAY="300"
+    LIVENESS_FAILURE_THRESHOLD="10"
   else
     # Otros servicios: dar 120+ segundos para que terminen la inicialización
-    CLOUD_CONFIG_READINESS_INITIAL_DELAY="130"
-    CLOUD_CONFIG_READINESS_FAILURE_THRESHOLD="60"
-    CLOUD_CONFIG_LIVENESS_INITIAL_DELAY="300"
-    CLOUD_CONFIG_LIVENESS_FAILURE_THRESHOLD="10"
+    READINESS_INITIAL_DELAY="130"
+    READINESS_FAILURE_THRESHOLD="60"
+    LIVENESS_INITIAL_DELAY="300"
+    LIVENESS_FAILURE_THRESHOLD="10"
   fi
 
   if [[ "${svc}" == "cloud-config" ]]; then
@@ -395,7 +395,8 @@ if [[ -n "${SEEN[service-discovery]:-}" ]]; then
   kubectl --namespace "${K8S_NAMESPACE}" apply -f "${RENDER_DIR}/service-discovery.yaml"
   
   log_info "Esperando rollout de service-discovery (dependencia crítica)..."
-  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/service-discovery" --timeout="300s"; then
+  # Timeout aumentado para permitir que el probe inicial tenga suficiente tiempo (180s initial + margin)
+  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/service-discovery" --timeout="600s"; then
     log_error "El servicio service-discovery no alcanzó el estado Ready dentro del tiempo esperado."
     log_info "Estado de pods para service-discovery:"
     kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="service-discovery" -o wide
@@ -421,7 +422,8 @@ fi
     kubectl --namespace "${K8S_NAMESPACE}" apply -f "${RENDER_DIR}/cloud-config.yaml"
     
     log_info "Esperando rollout de cloud-config..."
-    if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/cloud-config" --timeout="300s"; then
+    # Timeout aumentado para permitir que el probe inicial tenga suficiente tiempo (150s initial + margin)
+    if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/cloud-config" --timeout="600s"; then
       log_error "El servicio cloud-config no alcanzó el estado Ready dentro del tiempo esperado."
       log_info "Estado de pods para cloud-config:"
       kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="cloud-config" -o wide
@@ -481,11 +483,11 @@ fi
       
       if [[ "${VERIFIED}" != "true" ]]; then
         log_warn "⚠️  No se pudo verificar puerto 9296 después de ${MAX_WAIT_TIME}s, continuando de todas formas..."
-        sleep 30  # Espera mínima antes de continuar
+        sleep 60  # Espera mínima antes de continuar
       else
         # Si la verificación fue exitosa, esperar tiempo adicional para estabilización
-        log_info "⏳ Esperando 60s adicionales para que ConfigServer se estabilice completamente..."
-        sleep 60
+        log_info "⏳ Esperando 90s adicionales para que ConfigServer se estabilice completamente..."
+        sleep 90
       fi
     fi
     
@@ -493,7 +495,9 @@ fi
   fi
 
 log_info "Servicios críticos listos. Desplegando servicios restantes..."
-sleep 5
+# Espera adicional para asegurar que cloud-config esté 100% estable antes de desplegar otros servicios
+log_info "⏳ Esperando 30s adicionales para estabilización del cluster..."
+sleep 30
 
 # NOTE: Ya NO necesitamos verificar el puerto 9296 porque:
 # 1. Los servicios usan fail-fast: false (opcional config-server)
@@ -524,8 +528,8 @@ for svc in "${SERVICES[@]}"; do
   fi
   
   log_info "Esperando rollout de ${svc}..."
-  # Timeout más corto para capturar logs rápido si falla
-  TIMEOUT="120s"
+  # Timeout ajustado para permitir que los probes tengan suficiente tiempo (130s initial + margin)
+  TIMEOUT="480s"
   if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="${TIMEOUT}"; then
     log_error "El despliegue de ${svc} no alcanzó el estado Ready dentro del tiempo esperado."
     log_info "Estado actual de pods:"
