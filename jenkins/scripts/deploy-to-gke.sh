@@ -434,12 +434,56 @@ fi
       exit 1
     fi
     
-    # ESPERA ADICIONAL: cloud-config puede reportar healthy pero no estar listo para recibir requests
+    # VERIFICACIÓN ACTIVA: cloud-config puede reportar healthy pero no estar listo para recibir requests
     # cloud-config necesita más tiempo para abrir el puerto 9296 internamente
-    log_info "⏳ Espera adicional (120s) para que cloud-config stabilice su puerto 9296..."
-    sleep 120
+    log_info "⏳ Esperando que cloud-config esté disponible en puerto 9296..."
     
-    log_success "cloud-config espera completada."
+    # Máximo 5 minutos intentando verificar disponibilidad
+    MAX_WAIT_TIME=300  # 5 minutos
+    ELAPSED=0
+    RETRY_INTERVAL=5
+    CLOUD_CONFIG_POD=""
+    
+    # Obtener el nombre del pod de cloud-config
+    while [[ -z "${CLOUD_CONFIG_POD}" && ${ELAPSED} -lt 60 ]]; do
+      CLOUD_CONFIG_POD=$(kubectl --namespace "${K8S_NAMESPACE}" get pod -l app="cloud-config" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+      if [[ -z "${CLOUD_CONFIG_POD}" ]]; then
+        sleep ${RETRY_INTERVAL}
+        ELAPSED=$((ELAPSED + RETRY_INTERVAL))
+      fi
+    done
+    
+    if [[ -z "${CLOUD_CONFIG_POD}" ]]; then
+      log_warn "No se encontró pod de cloud-config, continuando con espera fija..."
+      sleep 120
+    else
+      # Hacer port-forward y verificar que el puerto 9296 está accesible
+      log_info "Verificando puerto 9296 en pod: ${CLOUD_CONFIG_POD}..."
+      ELAPSED=0
+      VERIFIED=false
+      
+      while [[ ${ELAPSED} -lt ${MAX_WAIT_TIME} ]]; do
+        # Test de conectividad al puerto 9296
+        if kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- curl -sf http://localhost:9296/actuator/health > /dev/null 2>&1; then
+          log_success "✅ Puerto 9296 de cloud-config verificado y respondiendo."
+          VERIFIED=true
+          break
+        else
+          if [[ $((ELAPSED % 30)) -eq 0 ]]; then
+            log_info "⏳ Esperando puerto 9296... (${ELAPSED}s / ${MAX_WAIT_TIME}s)"
+          fi
+          sleep ${RETRY_INTERVAL}
+          ELAPSED=$((ELAPSED + RETRY_INTERVAL))
+        fi
+      done
+      
+      if [[ "${VERIFIED}" != "true" ]]; then
+        log_warn "⚠️  No se pudo verificar puerto 9296 después de ${MAX_WAIT_TIME}s, continuando de todas formas..."
+        sleep 30  # Espera mínima antes de continuar
+      fi
+    fi
+    
+    log_success "cloud-config verificación completada."
   fi
 
 log_info "Servicios críticos listos. Desplegando servicios restantes..."
