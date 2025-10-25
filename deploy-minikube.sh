@@ -1,3 +1,4 @@
+
 #!/usr/bin/env bash
 # Script definitivo para desplegar microservicios en Minikube
 # Basado en pruebas y fixes validados
