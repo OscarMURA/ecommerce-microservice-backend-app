@@ -24,7 +24,7 @@ spring:
       default-filters:
         - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin, RETAIN_UNIQUE
       globalcors:
-        add-to-simple-url-handler-mapping: true
+        # add-to-simple-url-handler-mapping: true  # Comentado: causa error en algunas versiones de Spring Cloud
         cors-configurations:
           '[/**]':
             allowed-origins: "${CLIENT_HOST:http://localhost:4200}"
