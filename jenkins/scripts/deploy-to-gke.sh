@@ -101,22 +101,23 @@ declare -A SERVICE_PORTS=(
   [payment-service]=8400
 )
 
-declare -A SERVICE_TYPES=(
-  [api-gateway]=LoadBalancer
-)
+# Configuración de tipos de servicio
+SERVICE_TYPES[api-gateway]="LoadBalancer"
 
-declare -A SERVICE_HEALTH_PATH=(
-  [service-discovery]="/actuator/health"
-  [cloud-config]="/actuator/health"
-  [api-gateway]="/actuator/health"
-  [proxy-client]="/actuator/health"
-  [user-service]="/actuator/health"
-  [product-service]="/actuator/health"
-  [favourite-service]="/actuator/health"
-  [order-service]="/actuator/health"
-  [shipping-service]="/actuator/health"
-  [payment-service]="/actuator/health"
-)
+# Rutas de health check para cada servicio (CRÍTICO: usadas por readiness probes)
+# Nota: NO usar 'declare -A' aquí porque interfiere con la expansión en funciones
+# En su lugar, asignar directamente a la variable global
+typeset -A SERVICE_HEALTH_PATH
+SERVICE_HEALTH_PATH[service-discovery]="/actuator/health"
+SERVICE_HEALTH_PATH[cloud-config]="/actuator/health"
+SERVICE_HEALTH_PATH[api-gateway]="/actuator/health"
+SERVICE_HEALTH_PATH[proxy-client]="/actuator/health"
+SERVICE_HEALTH_PATH[user-service]="/actuator/health"
+SERVICE_HEALTH_PATH[product-service]="/actuator/health"
+SERVICE_HEALTH_PATH[favourite-service]="/actuator/health"
+SERVICE_HEALTH_PATH[order-service]="/actuator/health"
+SERVICE_HEALTH_PATH[shipping-service]="/actuator/health"
+SERVICE_HEALTH_PATH[payment-service]="/actuator/health"
 
 declare -A SERVICE_REPLICAS=(
   [api-gateway]=2
@@ -217,7 +218,15 @@ render_manifest() {
   local svc="$1"
   local port="${SERVICE_PORTS[${svc}]}"
   local service_type="${SERVICE_TYPES[${svc}]:-ClusterIP}"
-  local health_path="${SERVICE_HEALTH_PATH[${svc}]:-/actuator/health}"
+  
+  # CRÍTICO: Obtener health_path del array global con fallback seguro
+  # Nota: En bash, el array se accede como SERVICE_HEALTH_PATH[$svc]
+  # Si no existe, usar el fallback /actuator/health
+  local health_path="/actuator/health"
+  if [[ -n "${SERVICE_HEALTH_PATH[${svc}]:-}" ]]; then
+    health_path="${SERVICE_HEALTH_PATH[${svc}]}"
+  fi
+  
   local replicas="${SERVICE_REPLICAS[${svc}]:-${K8S_DEFAULT_REPLICAS}}"
   local manifest="${RENDER_DIR}/${svc}.yaml"
   local extra_env_block=""
