@@ -151,6 +151,35 @@ fi
 
 log_info "Servicios a desplegar: ${SERVICES[*]}"
 
+# Función para detectar si un servicio necesita ser reconstruido
+needs_rebuild() {
+  local svc="$1"
+  local current_commit="$2"
+  
+  # Verificar si el servicio tiene cambios desde el último commit
+  if git diff --quiet HEAD~1 HEAD -- "${svc}/"; then
+    log_info "✅ ${svc}: Sin cambios detectados, usando imagen existente"
+    return 1  # No necesita rebuild
+  else
+    log_info "🔄 ${svc}: Cambios detectados, necesita rebuild"
+    return 0  # Necesita rebuild
+  fi
+}
+
+# Detectar servicios que necesitan rebuild
+SERVICES_TO_BUILD=()
+SERVICES_TO_DEPLOY=()
+
+for svc in "${SERVICES[@]}"; do
+  if needs_rebuild "${svc}" "${K8S_IMAGE_TAG}"; then
+    SERVICES_TO_BUILD+=("${svc}")
+  fi
+  SERVICES_TO_DEPLOY+=("${svc}")
+done
+
+log_info "Servicios que necesitan rebuild: ${SERVICES_TO_BUILD[*]:-ninguno}"
+log_info "Servicios a desplegar: ${SERVICES_TO_DEPLOY[*]}"
+
 # Limpieza optimizada: eliminar deployments en paralelo sin bloquear
 log_info "Limpiando deployments viejos (en paralelo)..."
 for svc in "${SERVICES[@]}"; do

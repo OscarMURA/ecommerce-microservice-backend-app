@@ -166,7 +166,33 @@ gcloud auth configure-docker "$REGISTRY_HOST" --quiet
 
 services="cloud-config service-discovery api-gateway proxy-client user-service product-service favourite-service order-service shipping-service payment-service"
 
+# Función para detectar si un servicio necesita rebuild
+needs_rebuild() {
+  local service="$1"
+  local service_dir="$REMOTE_DIR/$service"
+  
+  # Verificar si el servicio tiene cambios desde el último commit
+  if git diff --quiet HEAD~1 HEAD -- "$service/"; then
+    echo "✅ $service: Sin cambios detectados, usando imagen existente"
+    return 1  # No necesita rebuild
+  else
+    echo "🔄 $service: Cambios detectados, necesita rebuild"
+    return 0  # Necesita rebuild
+  fi
+}
+
+# Detectar servicios que necesitan rebuild
+services_to_build=()
 for service in $services; do
+  if needs_rebuild "$service"; then
+    services_to_build+=("$service")
+  fi
+done
+
+echo "📋 Servicios que necesitan rebuild: ${services_to_build[*]:-ninguno}"
+
+# Solo construir servicios que cambiaron
+for service in "${services_to_build[@]}"; do
   SERVICE_DIR="$REMOTE_DIR/$service"
   DOCKERFILE_PATH="$SERVICE_DIR/Dockerfile"
   
@@ -206,6 +232,11 @@ for service in $services; do
   
   echo "✅ Completado: $service"
 done
+
+# Si no hay servicios que construir, usar imágenes existentes
+if [ ${#services_to_build[@]} -eq 0 ]; then
+  echo "🎯 No hay servicios que reconstruir, usando imágenes existentes"
+fi
 
 echo ""
 echo "✅ Todas las imágenes fueron construidas y subidas"
