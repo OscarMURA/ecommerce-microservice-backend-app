@@ -171,12 +171,15 @@ needs_rebuild() {
   local service="$1"
   local service_dir="$REMOTE_DIR/$service"
   
-  # Verificar si el servicio tiene cambios desde el último commit
-  if git diff --quiet HEAD~1 HEAD -- "$service/"; then
-    echo "✅ $service: Sin cambios detectados, usando imagen existente"
+  # Verificar si existe la imagen en el registry
+  local image_name="${IMAGE_REGISTRY}/${service}:${IMAGE_TAG}"
+  
+  # Intentar hacer pull de la imagen para verificar si existe
+  if docker pull "$image_name" >/dev/null 2>&1; then
+    echo "✅ $service: Imagen existente encontrada en registry, usando imagen existente"
     return 1  # No necesita rebuild
   else
-    echo "🔄 $service: Cambios detectados, necesita rebuild"
+    echo "🔄 $service: Imagen no encontrada en registry, necesita rebuild"
     return 0  # Necesita rebuild
   fi
 }
