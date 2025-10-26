@@ -454,6 +454,7 @@ spec:
           ports:
             - name: http
               containerPort: ${port}
+              protocol: TCP
           env:
             - name: SERVER_PORT
               value: "${port}"
@@ -467,7 +468,7 @@ ${extra_env_block}
           readinessProbe:
             httpGet:
               path: ${health_path}
-              port: http
+              port: ${port}
             initialDelaySeconds: ${READINESS_INITIAL_DELAY:-90}
             periodSeconds: 5
             failureThreshold: ${READINESS_FAILURE_THRESHOLD:-50}
@@ -476,7 +477,7 @@ ${extra_env_block}
           livenessProbe:
             httpGet:
               path: ${health_path}
-              port: http
+              port: ${port}
             initialDelaySeconds: ${LIVENESS_INITIAL_DELAY:-300}
             periodSeconds: 30
             failureThreshold: ${LIVENESS_FAILURE_THRESHOLD:-10}
