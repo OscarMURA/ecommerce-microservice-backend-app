@@ -376,19 +376,19 @@ render_manifest() {
   local replicas="${SERVICE_REPLICAS[${svc}]:-${K8S_DEFAULT_REPLICAS}}"
   local manifest="${RENDER_DIR}/${svc}.yaml"
   local extra_env_block=""
-  # Recursos optimizados basados en la configuración exitosa de Minikube
-  local cpu_request="100m"
-  local cpu_limit="400m"
-  local mem_request="256Mi"
-  local mem_limit="512Mi"
+  # Recursos optimizados para GKE con nodos más potentes
+  local cpu_request="200m"
+  local cpu_limit="800m"
+  local mem_request="512Mi"
+  local mem_limit="1Gi"
 
   # Asignar recursos específicos según las necesidades de cada servicio
   if [[ "${svc}" == "service-discovery" ]]; then
-    # service-discovery es crítico pero más ligero (como en Minikube)
-    cpu_request="50m"
-    cpu_limit="300m"
-    mem_request="256Mi"
-    mem_limit="512Mi"
+    # service-discovery es crítico pero más ligero
+    cpu_request="100m"
+    cpu_limit="500m"
+    mem_request="512Mi"
+    mem_limit="1Gi"
   fi
 
   # Probes optimizadas basadas en la configuración exitosa de Minikube
@@ -450,7 +450,7 @@ spec:
       containers:
         - name: ${svc}
           image: ${K8S_IMAGE_REGISTRY}/${svc}:${K8S_IMAGE_TAG}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: ${port}
