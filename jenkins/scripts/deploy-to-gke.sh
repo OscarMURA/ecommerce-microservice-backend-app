@@ -433,11 +433,11 @@ render_manifest() {
     LIVENESS_INITIAL_DELAY="360"
     LIVENESS_FAILURE_THRESHOLD="15"
   elif [[ "${svc}" == "proxy-client" ]]; then
-    # proxy-client necesita más tiempo para readiness probe
-    READINESS_INITIAL_DELAY="60"
-    READINESS_FAILURE_THRESHOLD="20"
-    LIVENESS_INITIAL_DELAY="120"
-    LIVENESS_FAILURE_THRESHOLD="5"
+    # proxy-client necesita MUCHO más tiempo para readiness probe
+    READINESS_INITIAL_DELAY="180"
+    READINESS_FAILURE_THRESHOLD="30"
+    LIVENESS_INITIAL_DELAY="240"
+    LIVENESS_FAILURE_THRESHOLD="10"
   else
     # Otros servicios: dar 120+ segundos para que terminen la inicialización
     READINESS_INITIAL_DELAY="130"
@@ -746,7 +746,7 @@ for svc in "${SERVICES[@]}"; do
     TIMEOUT="720s"  # 12 minutos: 200s initial + 100 failures * 5s = ~700s max
     log_info "⚠️  api-gateway requiere más tiempo (${TIMEOUT}) debido a dependencia con cloud-config"
   elif [[ "${svc}" == "proxy-client" ]]; then
-    TIMEOUT="600s"  # 10 minutos: 60s initial + 20 failures * 5s = ~160s max, pero dar margen
+    TIMEOUT="900s"  # 15 minutos: 180s initial + 30 failures * 5s = ~330s max, pero dar margen
     log_info "⚠️  proxy-client requiere más tiempo (${TIMEOUT}) para estabilizar readiness probe"
   fi
   
@@ -805,3 +805,4 @@ kubectl --namespace "${K8S_NAMESPACE}" get services
 kubectl --namespace "${K8S_NAMESPACE}" get pods -o wide
 
 log_success "Despliegue completado."
+
