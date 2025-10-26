@@ -53,8 +53,8 @@ kubectl create namespace ecommerce --dry-run=client -o yaml | kubectl apply -f -
 
 # Apply ConfigMap and Secrets
 log_info "Aplicando ConfigMap y Secrets..."
-kubectl apply -f minikube-configmap.yaml
-kubectl apply -f minikube-secrets.yaml
+kubectl apply -f minikube-deployment/minikube-configmap.yaml
+kubectl apply -f minikube-deployment/minikube-secrets.yaml
 
 # Build and load images to Minikube
 log_info "Construyendo imágenes para Minikube..."

@@ -19,6 +19,8 @@ cd /path/to/ecommerce-microservice-backend-app
 ./minikube-deployment/test-minikube.sh
 ```
 
+**Nota**: El script debe ejecutarse desde la carpeta raíz del proyecto para que pueda encontrar los Dockerfiles de los microservicios.
+
 ## 📋 Servicios Desplegados
 
 - ✅ **service-discovery** (Eureka Server) - Puerto 8761

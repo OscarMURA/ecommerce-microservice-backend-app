@@ -29,8 +29,7 @@ Script optimizado para desplegar microservicios de ecommerce en Minikube con con
 
 ### Despliegue Completo
 ```bash
-# Desde la carpeta raíz del proyecto
-./minikube-deployment/test-minikube.sh
+./test-minikube.sh
 ```
 
 ### Limpieza Completa
