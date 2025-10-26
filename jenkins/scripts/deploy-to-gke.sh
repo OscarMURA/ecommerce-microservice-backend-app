@@ -400,10 +400,10 @@ render_manifest() {
     LIVENESS_INITIAL_DELAY="120"
     LIVENESS_FAILURE_THRESHOLD="5"
   else
-    # Microservicios de negocio: más tiempo para inicialización completa
-    READINESS_INITIAL_DELAY="120"
+    # Microservicios de negocio: tiempo realista basado en logs (89s + margen)
+    READINESS_INITIAL_DELAY="150"
     READINESS_FAILURE_THRESHOLD="15"
-    LIVENESS_INITIAL_DELAY="180"
+    LIVENESS_INITIAL_DELAY="200"
     LIVENESS_FAILURE_THRESHOLD="5"
   fi
 
@@ -433,6 +433,7 @@ metadata:
     jenkins.io/git-commit: "${GIT_COMMIT:-unknown}"
 spec:
   replicas: ${replicas}
+  progressDeadlineSeconds: 900
   selector:
     matchLabels:
       app: "${svc}"
