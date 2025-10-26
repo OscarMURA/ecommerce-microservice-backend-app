@@ -105,12 +105,12 @@ declare -A SERVICE_TYPES
 # Rutas de health check para cada servicio (CRÍTICO: usadas por readiness probes)
 declare -A SERVICE_HEALTH_PATH=(
   [service-discovery]="/actuator/health"
-  [user-service]="/actuator/health"
-  [product-service]="/actuator/health"
-  [favourite-service]="/actuator/health"
-  [order-service]="/actuator/health"
-  [shipping-service]="/actuator/health"
-  [payment-service]="/actuator/health"
+  [user-service]="/user-service/actuator/health"
+  [product-service]="/product-service/actuator/health"
+  [favourite-service]="/favourite-service/actuator/health"
+  [order-service]="/order-service/actuator/health"
+  [shipping-service]="/shipping-service/actuator/health"
+  [payment-service]="/payment-service/actuator/health"
 )
 
 declare -A SERVICE_REPLICAS=(
