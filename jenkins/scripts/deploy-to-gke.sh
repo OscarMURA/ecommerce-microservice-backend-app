@@ -170,17 +170,34 @@ needs_rebuild() {
 is_service_healthy() {
   local svc="$1"
   
-  # Verificar si el deployment existe y está listo
+  # Verificar si el deployment existe
   if kubectl --namespace "${K8S_NAMESPACE}" get deployment "${svc}" &>/dev/null 2>&1; then
-    # Verificar si está listo (Ready/1)
+    # Verificar si está listo (Ready/1) - MÁS ESTRICTO
     local ready_replicas=$(kubectl --namespace "${K8S_NAMESPACE}" get deployment "${svc}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
     local desired_replicas=$(kubectl --namespace "${K8S_NAMESPACE}" get deployment "${svc}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+    local available_replicas=$(kubectl --namespace "${K8S_NAMESPACE}" get deployment "${svc}" -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo "0")
     
-    if [[ "${ready_replicas}" -eq "${desired_replicas}" && "${ready_replicas}" -gt 0 ]]; then
-      log_info "✅ ${svc}: Ya está funcionando correctamente"
-      return 0  # Está funcionando
+    # Verificar que TODOS los pods estén Ready y Available
+    if [[ "${ready_replicas}" -eq "${desired_replicas}" && "${available_replicas}" -eq "${desired_replicas}" && "${ready_replicas}" -gt 0 ]]; then
+      # Verificación ADICIONAL: comprobar que el pod esté realmente funcionando
+      local pod_name=$(kubectl --namespace "${K8S_NAMESPACE}" get pod -l app="${svc}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+      if [[ -n "${pod_name}" ]]; then
+        local pod_status=$(kubectl --namespace "${K8S_NAMESPACE}" get pod "${pod_name}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+        local pod_ready=$(kubectl --namespace "${K8S_NAMESPACE}" get pod "${pod_name}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "False")
+        
+        if [[ "${pod_status}" == "Running" && "${pod_ready}" == "True" ]]; then
+          log_info "✅ ${svc}: Ya está funcionando correctamente (${ready_replicas}/${desired_replicas} ready, ${available_replicas} available)"
+          return 0  # Está funcionando
+        else
+          log_info "❌ ${svc}: Pod no está funcionando correctamente (Status: ${pod_status}, Ready: ${pod_ready})"
+          return 1  # Necesita redeploy
+        fi
+      else
+        log_info "❌ ${svc}: No se encontró pod activo"
+        return 1  # Necesita redeploy
+      fi
     else
-      log_info "❌ ${svc}: No está funcionando correctamente (${ready_replicas}/${desired_replicas} ready)"
+      log_info "❌ ${svc}: No está funcionando correctamente (Ready: ${ready_replicas}/${desired_replicas}, Available: ${available_replicas}/${desired_replicas})"
       return 1  # Necesita redeploy
     fi
   else
@@ -204,6 +221,19 @@ critical_service_needs_rebuild() {
   if echo "${commit_message}" | grep -qi "rebuild.*${svc}\|${svc}.*rebuild\|force.*${svc}\|${svc}.*force"; then
     log_info "🔄 ${svc}: Commit message indica rebuild forzado"
     return 0  # Necesita rebuild
+  fi
+  
+  # Verificación ESPECIAL para cloud-config: detectar loop de self-connection
+  if [[ "${svc}" == "cloud-config" ]]; then
+    local pod_name=$(kubectl --namespace "${K8S_NAMESPACE}" get pod -l app="cloud-config" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    if [[ -n "${pod_name}" ]]; then
+      # Verificar logs para detectar loop de self-connection
+      local logs=$(kubectl --namespace "${K8S_NAMESPACE}" logs "${pod_name}" --tail=20 2>/dev/null || echo "")
+      if echo "${logs}" | grep -q "Fetching config from server at : http://cloud-config:9296/"; then
+        log_warn "🔄 ${svc}: Detectado loop de self-connection, forzando rebuild"
+        return 0  # Necesita rebuild
+      fi
+    fi
   fi
   
   log_info "✅ ${svc}: Sin cambios en servicio crítico, preservando"
