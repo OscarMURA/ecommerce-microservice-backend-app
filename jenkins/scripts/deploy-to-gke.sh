@@ -291,11 +291,11 @@ render_manifest() {
   # inicialDelaySeconds: esperar antes de la primera prueba (debe ser >= startup time)
   # failureThreshold: número de fallos antes de marcar como NOT Ready
   if [[ "${svc}" == "cloud-config" ]]; then
-    # Cloud-config es crítico y tarda más
-    READINESS_INITIAL_DELAY="150"
-    READINESS_FAILURE_THRESHOLD="100"
-    LIVENESS_INITIAL_DELAY="300"
-    LIVENESS_FAILURE_THRESHOLD="15"
+    # Cloud-config: usar configuración que funciona en Minikube
+    READINESS_INITIAL_DELAY="30"
+    READINESS_FAILURE_THRESHOLD="3"
+    LIVENESS_INITIAL_DELAY="60"
+    LIVENESS_FAILURE_THRESHOLD="3"
   elif [[ "${svc}" == "service-discovery" ]]; then
     # Service discovery también es crítico y tarda más por Jersey/Eureka UI
     READINESS_INITIAL_DELAY="180"
