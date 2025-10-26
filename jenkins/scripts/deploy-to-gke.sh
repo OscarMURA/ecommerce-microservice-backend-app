@@ -105,12 +105,12 @@ declare -A SERVICE_TYPES
 # Rutas de health check para cada servicio (CRÍTICO: usadas por readiness probes)
 declare -A SERVICE_HEALTH_PATH=(
   [service-discovery]="/actuator/health"
-  [user-service]="/user-service/actuator/health"
-  [product-service]="/product-service/actuator/health"
-  [favourite-service]="/favourite-service/actuator/health"
-  [order-service]="/order-service/actuator/health"
-  [shipping-service]="/shipping-service/actuator/health"
-  [payment-service]="/payment-service/actuator/health"
+  [user-service]="/actuator/health"
+  [product-service]="/actuator/health"
+  [favourite-service]="/actuator/health"
+  [order-service]="/actuator/health"
+  [shipping-service]="/actuator/health"
+  [payment-service]="/actuator/health"
 )
 
 declare -A SERVICE_REPLICAS=(
@@ -400,10 +400,10 @@ render_manifest() {
     LIVENESS_INITIAL_DELAY="120"
     LIVENESS_FAILURE_THRESHOLD="5"
   else
-    # Microservicios de negocio: configuración que funciona en Minikube
-    READINESS_INITIAL_DELAY="60"
-    READINESS_FAILURE_THRESHOLD="10"
-    LIVENESS_INITIAL_DELAY="120"
+    # Microservicios de negocio: más tiempo para inicialización completa
+    READINESS_INITIAL_DELAY="120"
+    READINESS_FAILURE_THRESHOLD="15"
+    LIVENESS_INITIAL_DELAY="180"
     LIVENESS_FAILURE_THRESHOLD="5"
   fi
 
@@ -571,7 +571,7 @@ for svc in "${SERVICES[@]}"; do
   
   log_info "Esperando rollout de ${svc}..."
   # Timeout optimizado basado en la configuración exitosa de Minikube
-  TIMEOUT="300s"
+  TIMEOUT="600s"
   
   # Todos los microservicios usan la misma configuración optimizada
   log_info "⏳ ${svc}: Usando timeout optimizado (${TIMEOUT})"
