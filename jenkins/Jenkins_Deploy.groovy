@@ -171,6 +171,12 @@ needs_rebuild() {
   local service="$1"
   local service_dir="$REMOTE_DIR/$service"
   
+  # TEMPORAL: Forzar rebuild de cloud-config para aplicar el fix del loop
+  if [[ "$service" == "cloud-config" ]]; then
+    echo "🔄 $service: Forzando rebuild para aplicar fix del loop"
+    return 0  # Necesita rebuild
+  fi
+  
   # Verificar si existe la imagen en el registry
   local image_name="${IMAGE_REGISTRY}/${service}:${IMAGE_TAG}"
   
