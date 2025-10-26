@@ -166,24 +166,112 @@ needs_rebuild() {
   fi
 }
 
+# Función para verificar si un servicio está funcionando correctamente
+is_service_healthy() {
+  local svc="$1"
+  
+  # Verificar si el deployment existe y está listo
+  if kubectl --namespace "${K8S_NAMESPACE}" get deployment "${svc}" &>/dev/null 2>&1; then
+    # Verificar si está listo (Ready/1)
+    local ready_replicas=$(kubectl --namespace "${K8S_NAMESPACE}" get deployment "${svc}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+    local desired_replicas=$(kubectl --namespace "${K8S_NAMESPACE}" get deployment "${svc}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+    
+    if [[ "${ready_replicas}" -eq "${desired_replicas}" && "${ready_replicas}" -gt 0 ]]; then
+      log_info "✅ ${svc}: Ya está funcionando correctamente"
+      return 0  # Está funcionando
+    else
+      log_info "❌ ${svc}: No está funcionando correctamente (${ready_replicas}/${desired_replicas} ready)"
+      return 1  # Necesita redeploy
+    fi
+  else
+    log_info "🆕 ${svc}: No existe, necesita deploy inicial"
+    return 1  # Necesita deploy
+  fi
+}
+
+# Función para detectar si un servicio crítico necesita rebuild forzado
+critical_service_needs_rebuild() {
+  local svc="$1"
+  
+  # Verificar si hay cambios en el directorio del servicio
+  if ! git diff --quiet HEAD~1 HEAD -- "${svc}/"; then
+    log_info "🔄 ${svc}: Cambios detectados en servicio crítico, forzando rebuild"
+    return 0  # Necesita rebuild
+  fi
+  
+  # Verificar si el commit message indica rebuild forzado
+  local commit_message=$(git log -1 --pretty=%B)
+  if echo "${commit_message}" | grep -qi "rebuild.*${svc}\|${svc}.*rebuild\|force.*${svc}\|${svc}.*force"; then
+    log_info "🔄 ${svc}: Commit message indica rebuild forzado"
+    return 0  # Necesita rebuild
+  fi
+  
+  log_info "✅ ${svc}: Sin cambios en servicio crítico, preservando"
+  return 1  # No necesita rebuild
+}
+
+# Servicios críticos que NO se deben tocar si están funcionando
+CRITICAL_SERVICES=("service-discovery" "cloud-config" "api-gateway")
+
 # Detectar servicios que necesitan rebuild
 SERVICES_TO_BUILD=()
 SERVICES_TO_DEPLOY=()
+SERVICES_TO_CLEAN=()
 
+# Verificar servicios críticos antes de limpiar
+log_info "🔍 Verificando estado de servicios críticos..."
+for svc in "${CRITICAL_SERVICES[@]}"; do
+  if [[ " ${SERVICES[*]} " =~ " ${svc} " ]]; then
+    if is_service_healthy "${svc}"; then
+      log_success "✅ ${svc}: Funcionando correctamente, preservando..."
+      # Solo agregar a rebuild si hay cambios o commit message lo indica
+      if critical_service_needs_rebuild "${svc}"; then
+        SERVICES_TO_BUILD+=("${svc}")
+        SERVICES_TO_CLEAN+=("${svc}")
+        log_warn "🔄 ${svc}: Cambios detectados, forzando rebuild"
+      else
+        log_info "🛡️  ${svc}: Sin cambios, preservando deployment existente"
+      fi
+    else
+      log_warn "⚠️  ${svc}: Necesita redeploy"
+      SERVICES_TO_BUILD+=("${svc}")
+      SERVICES_TO_CLEAN+=("${svc}")
+    fi
+  fi
+done
+
+# Procesar servicios no críticos
 for svc in "${SERVICES[@]}"; do
+  # Si es un servicio crítico, ya fue procesado arriba
+  if [[ " ${CRITICAL_SERVICES[*]} " =~ " ${svc} " ]]; then
+    continue
+  fi
+  
+  # Servicios no críticos: siempre verificar si necesitan rebuild
   if needs_rebuild "${svc}" "${K8S_IMAGE_TAG}"; then
     SERVICES_TO_BUILD+=("${svc}")
   fi
+  
+  # Agregar a deploy y clean
   SERVICES_TO_DEPLOY+=("${svc}")
+  SERVICES_TO_CLEAN+=("${svc}")
 done
 
-log_info "Servicios que necesitan rebuild: ${SERVICES_TO_BUILD[*]:-ninguno}"
-log_info "Servicios a desplegar: ${SERVICES_TO_DEPLOY[*]}"
+log_info "📋 Servicios que necesitan rebuild: ${SERVICES_TO_BUILD[*]:-ninguno}"
+log_info "📋 Servicios a desplegar: ${SERVICES_TO_DEPLOY[*]}"
+log_info "📋 Servicios a limpiar: ${SERVICES_TO_CLEAN[*]:-ninguno}"
 
-# Limpieza optimizada: eliminar deployments en paralelo sin bloquear
-log_info "Limpiando deployments viejos (en paralelo)..."
-for svc in "${SERVICES[@]}"; do
-  # Eliminar en background sin esperar (--cascade=background es más rápido)
+# Limpieza selectiva: solo limpiar servicios que necesitan redeploy
+log_info "🧹 Limpiando deployments selectivamente..."
+for svc in "${SERVICES_TO_CLEAN[@]}"; do
+  # Si es un servicio crítico y está funcionando, NO limpiar
+  if [[ " ${CRITICAL_SERVICES[*]} " =~ " ${svc} " ]] && is_service_healthy "${svc}" && ! critical_service_needs_rebuild "${svc}"; then
+    log_info "🛡️  Preservando ${svc} (servicio crítico funcionando sin cambios)"
+    continue
+  fi
+  
+  # Limpiar solo si necesita redeploy
+  log_info "🧹 Limpiando ${svc} (necesita redeploy)..."
   if kubectl --namespace "${K8S_NAMESPACE}" get deployment "${svc}" &>/dev/null 2>&1; then
     kubectl --namespace "${K8S_NAMESPACE}" delete deployment "${svc}" --cascade=background --ignore-not-found=true 2>/dev/null &
   fi
@@ -193,13 +281,18 @@ done
 wait
 
 # Espera rápida para que los pods se terminen
-log_info "Esperando a que los pods antiguos se terminen..."
-for svc in "${SERVICES[@]}"; do
+log_info "⏳ Esperando a que los pods antiguos se terminen..."
+for svc in "${SERVICES_TO_CLEAN[@]}"; do
+  # Solo limpiar pods si el servicio fue limpiado
+  if [[ " ${CRITICAL_SERVICES[*]} " =~ " ${svc} " ]] && is_service_healthy "${svc}" && ! critical_service_needs_rebuild "${svc}"; then
+    continue  # No limpiar pods de servicios críticos preservados
+  fi
+  
   kubectl --namespace "${K8S_NAMESPACE}" delete pods -l app="${svc}" --grace-period=5 --ignore-not-found=true 2>/dev/null || true &
 done
 wait
 
-log_success "Limpieza de deployments completada."
+log_success "✅ Limpieza selectiva de deployments completada."
 
 BASE_MANIFEST_DIR="${INFRA_REPO_DIR}/kubernetes/manifests"
 if [[ -d "${BASE_MANIFEST_DIR}" ]]; then
@@ -309,6 +402,12 @@ render_manifest() {
     READINESS_FAILURE_THRESHOLD="100"
     LIVENESS_INITIAL_DELAY="360"
     LIVENESS_FAILURE_THRESHOLD="15"
+  elif [[ "${svc}" == "proxy-client" ]]; then
+    # proxy-client necesita más tiempo para readiness probe
+    READINESS_INITIAL_DELAY="60"
+    READINESS_FAILURE_THRESHOLD="20"
+    LIVENESS_INITIAL_DELAY="120"
+    LIVENESS_FAILURE_THRESHOLD="5"
   else
     # Otros servicios: dar 120+ segundos para que terminen la inicialización
     READINESS_INITIAL_DELAY="130"
@@ -616,6 +715,9 @@ for svc in "${SERVICES[@]}"; do
   if [[ "${svc}" == "api-gateway" ]]; then
     TIMEOUT="720s"  # 12 minutos: 200s initial + 100 failures * 5s = ~700s max
     log_info "⚠️  api-gateway requiere más tiempo (${TIMEOUT}) debido a dependencia con cloud-config"
+  elif [[ "${svc}" == "proxy-client" ]]; then
+    TIMEOUT="600s"  # 10 minutos: 60s initial + 20 failures * 5s = ~160s max, pero dar margen
+    log_info "⚠️  proxy-client requiere más tiempo (${TIMEOUT}) para estabilizar readiness probe"
   fi
   
   if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="${TIMEOUT}"; then
