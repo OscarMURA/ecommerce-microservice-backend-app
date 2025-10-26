@@ -164,18 +164,12 @@ if [ -z "$REGISTRY_HOST" ]; then
 fi
 gcloud auth configure-docker "$REGISTRY_HOST" --quiet
 
-services="cloud-config service-discovery api-gateway proxy-client user-service product-service favourite-service order-service shipping-service payment-service"
+services="service-discovery user-service product-service favourite-service order-service shipping-service payment-service"
 
 # Función para detectar si un servicio necesita rebuild
 needs_rebuild() {
   local service="$1"
   local service_dir="$REMOTE_DIR/$service"
-  
-  # TEMPORAL: Forzar rebuild de cloud-config para aplicar el fix del loop
-  if [[ "$service" == "cloud-config" ]]; then
-    echo "🔄 $service: Forzando rebuild para aplicar fix del loop"
-    return 0  # Necesita rebuild
-  fi
   
   # Verificar si existe la imagen en el registry
   local image_name="${IMAGE_REGISTRY}/${service}:${IMAGE_TAG}"

@@ -548,8 +548,8 @@ gcloud auth configure-docker gcr.io --quiet
 
 cd "$REMOTE_DIR"
 
-# Lista de servicios a construir
-services_to_build="cloud-config service-discovery api-gateway proxy-client user-service product-service favourite-service order-service shipping-service payment-service"
+# Lista de servicios a construir (solo los que se van a desplegar)
+services_to_build="service-discovery user-service product-service favourite-service order-service shipping-service payment-service"
 
 for service in $services_to_build; do
   SERVICE_DIR="$REMOTE_DIR/$service"
