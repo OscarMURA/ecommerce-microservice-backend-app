@@ -4,10 +4,13 @@ server:
     context-path: /payment-service
 
 spring:
+  cloud:
+    config:
+      enabled: ${SPRING_CLOUD_CONFIG_ENABLED:false}
   zipkin:
     base-url: ${SPRING_ZIPKIN_BASE_URL:http://localhost:9411/}
   config:
-    import: ${SPRING_CONFIG_IMPORT:optional:configserver:http://cloud-config:9296}
+    import: ${SPRING_CONFIG_IMPORT:}
     fail-fast: false
   application:
     name: PAYMENT-SERVICE

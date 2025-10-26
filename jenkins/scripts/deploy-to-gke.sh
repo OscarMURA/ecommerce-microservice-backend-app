@@ -746,7 +746,7 @@ for svc in "${SERVICES[@]}"; do
     TIMEOUT="720s"  # 12 minutos: 200s initial + 100 failures * 5s = ~700s max
     log_info "⚠️  api-gateway requiere más tiempo (${TIMEOUT}) debido a dependencia con cloud-config"
   elif [[ "${svc}" == "proxy-client" ]]; then
-    TIMEOUT="900s"  # 15 minutos: 180s initial + 30 failures * 5s = ~330s max, pero dar margen
+    TIMEOUT="600s"  # 10 minutos: 60s initial + 20 failures * 5s = ~160s max, pero dar margen
     log_info "⚠️  proxy-client requiere más tiempo (${TIMEOUT}) para estabilizar readiness probe"
   fi
   
