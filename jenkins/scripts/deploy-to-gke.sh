@@ -89,38 +89,32 @@ fi
 log_success "Credenciales configuradas."
 
 declare -A SERVICE_PORTS=(
-  [cloud-config]=9296
   [service-discovery]=8761
-  [api-gateway]=8080
-  [proxy-client]=8900
-  [user-service]=8700
-  [product-service]=8500
-  [favourite-service]=8800
-  [order-service]=8300
-  [shipping-service]=8600
-  [payment-service]=8400
+  [user-service]=8085
+  [product-service]=8083
+  [favourite-service]=8086
+  [order-service]=8081
+  [shipping-service]=8084
+  [payment-service]=8082
 )
 
 # Configuración de tipos de servicio
 declare -A SERVICE_TYPES
-SERVICE_TYPES[api-gateway]="LoadBalancer"
+# Sin LoadBalancer por defecto - todos los servicios usan ClusterIP
 
 # Rutas de health check para cada servicio (CRÍTICO: usadas por readiness probes)
 declare -A SERVICE_HEALTH_PATH=(
   [service-discovery]="/actuator/health"
-  [cloud-config]="/actuator/health"
-  [api-gateway]="/actuator/health"
-  [proxy-client]="/actuator/health"
-  [user-service]="/actuator/health"
-  [product-service]="/actuator/health"
-  [favourite-service]="/actuator/health"
-  [order-service]="/actuator/health"
-  [shipping-service]="/actuator/health"
-  [payment-service]="/actuator/health"
+  [user-service]="/user-service/actuator/health"
+  [product-service]="/product-service/actuator/health"
+  [favourite-service]="/favourite-service/actuator/health"
+  [order-service]="/order-service/actuator/health"
+  [shipping-service]="/shipping-service/actuator/health"
+  [payment-service]="/payment-service/actuator/health"
 )
 
 declare -A SERVICE_REPLICAS=(
-  [api-gateway]=2
+  # Todos los servicios usan 1 réplica por defecto
 )
 
 readarray -t RAW_SERVICES < <(printf '%s\n' "${K8S_SERVICE_LIST}" | tr ',;' '\n' | tr ' ' '\n')
@@ -136,7 +130,7 @@ for svc in "${RAW_SERVICES[@]}"; do
   fi
 done
 
-for dep in cloud-config service-discovery; do
+for dep in service-discovery; do
   if [[ -z "${SEEN[${dep}]:-}" ]]; then
     log_warn "Agregando servicio dependiente requerido '${dep}'."
     SERVICES=("${dep}" "${SERVICES[@]}")
@@ -223,14 +217,14 @@ critical_service_needs_rebuild() {
     return 0  # Necesita rebuild
   fi
   
-  # Verificación ESPECIAL para cloud-config: detectar loop de self-connection
-  if [[ "${svc}" == "cloud-config" ]]; then
-    local pod_name=$(kubectl --namespace "${K8S_NAMESPACE}" get pod -l app="cloud-config" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+  # Verificación ESPECIAL para servicios críticos: detectar problemas comunes
+  if [[ "${svc}" == "service-discovery" ]]; then
+    local pod_name=$(kubectl --namespace "${K8S_NAMESPACE}" get pod -l app="service-discovery" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
     if [[ -n "${pod_name}" ]]; then
-      # Verificar logs para detectar loop de self-connection
+      # Verificar logs para detectar problemas de Eureka
       local logs=$(kubectl --namespace "${K8S_NAMESPACE}" logs "${pod_name}" --tail=20 2>/dev/null || echo "")
-      if echo "${logs}" | grep -q "Fetching config from server at : http://cloud-config:9296/"; then
-        log_warn "🔄 ${svc}: Detectado loop de self-connection, forzando rebuild"
+      if echo "${logs}" | grep -q "Unable to start web server"; then
+        log_warn "🔄 ${svc}: Detectado problema de inicio, forzando rebuild"
         return 0  # Necesita rebuild
       fi
     fi
@@ -241,7 +235,7 @@ critical_service_needs_rebuild() {
 }
 
 # Servicios críticos que NO se deben tocar si están funcionando
-CRITICAL_SERVICES=("service-discovery" "cloud-config" "api-gateway")
+CRITICAL_SERVICES=("service-discovery")
 
 # Detectar servicios que necesitan rebuild
 SERVICES_TO_BUILD=()
@@ -382,80 +376,42 @@ render_manifest() {
   local replicas="${SERVICE_REPLICAS[${svc}]:-${K8S_DEFAULT_REPLICAS}}"
   local manifest="${RENDER_DIR}/${svc}.yaml"
   local extra_env_block=""
-  # Ultra-low CPU requests debido a limitaciones del cluster
-  local cpu_request="15m"
-  local cpu_limit="100m"
-  local mem_request="96Mi"
-  local mem_limit="192Mi"
+  # Recursos optimizados basados en la configuración exitosa de Minikube
+  local cpu_request="100m"
+  local cpu_limit="400m"
+  local mem_request="256Mi"
+  local mem_limit="512Mi"
 
   # Asignar recursos específicos según las necesidades de cada servicio
-  if [[ "${svc}" == "cloud-config" ]]; then
-    # cloud-config necesita más memoria para evitar OOMKilled
+  if [[ "${svc}" == "service-discovery" ]]; then
+    # service-discovery es crítico pero más ligero (como en Minikube)
     cpu_request="50m"
-    cpu_limit="200m"
+    cpu_limit="300m"
     mem_request="256Mi"
     mem_limit="512Mi"
-  elif [[ "${svc}" == "service-discovery" ]]; then
-    # service-discovery es crítico pero más ligero
-    cpu_request="25m"
-    cpu_limit="150m"
-    mem_request="128Mi"
-    mem_limit="256Mi"
-  elif [[ "${svc}" == "api-gateway" ]]; then
-    # api-gateway necesita recursos significativos para manejar tráfico y evitar OOMKilled
-    cpu_request="100m"
-    cpu_limit="500m"
-    mem_request="256Mi"
-    mem_limit="1Gi"
   fi
 
-  # Probes específicas: dar mucho más tiempo para inicialización de beans Spring
-  # Los servicios tardan 90-120 segundos en completar la inicialización del contexto
-  # inicialDelaySeconds: esperar antes de la primera prueba (debe ser >= startup time)
-  # failureThreshold: número de fallos antes de marcar como NOT Ready
-  if [[ "${svc}" == "cloud-config" ]]; then
-    # Cloud-config: usar configuración que funciona en Minikube
-    READINESS_INITIAL_DELAY="30"
-    READINESS_FAILURE_THRESHOLD="3"
-    LIVENESS_INITIAL_DELAY="60"
-    LIVENESS_FAILURE_THRESHOLD="3"
-  elif [[ "${svc}" == "service-discovery" ]]; then
-    # Service discovery también es crítico y tarda más por Jersey/Eureka UI
-    READINESS_INITIAL_DELAY="180"
-    READINESS_FAILURE_THRESHOLD="80"
-    LIVENESS_INITIAL_DELAY="300"
-    LIVENESS_FAILURE_THRESHOLD="10"
-  elif [[ "${svc}" == "api-gateway" ]]; then
-    # API Gateway necesita mucho tiempo porque espera a conectarse a cloud-config
-    # Aunque cloud-config sea opcional, Spring Config intenta varias veces antes de continuar
-    READINESS_INITIAL_DELAY="200"
-    READINESS_FAILURE_THRESHOLD="100"
-    LIVENESS_INITIAL_DELAY="360"
-    LIVENESS_FAILURE_THRESHOLD="15"
-  elif [[ "${svc}" == "proxy-client" ]]; then
-    # proxy-client necesita MUCHO más tiempo para readiness probe
-    READINESS_INITIAL_DELAY="180"
-    READINESS_FAILURE_THRESHOLD="30"
-    LIVENESS_INITIAL_DELAY="240"
-    LIVENESS_FAILURE_THRESHOLD="10"
+  # Probes optimizadas basadas en la configuración exitosa de Minikube
+  # Usar configuración más simple y rápida que funciona en Minikube
+  if [[ "${svc}" == "service-discovery" ]]; then
+    # Service discovery: configuración que funciona en Minikube
+    READINESS_INITIAL_DELAY="60"
+    READINESS_FAILURE_THRESHOLD="10"
+    LIVENESS_INITIAL_DELAY="120"
+    LIVENESS_FAILURE_THRESHOLD="5"
   else
-    # Otros servicios: dar 120+ segundos para que terminen la inicialización
-    READINESS_INITIAL_DELAY="130"
-    READINESS_FAILURE_THRESHOLD="60"
-    LIVENESS_INITIAL_DELAY="300"
-    LIVENESS_FAILURE_THRESHOLD="10"
+    # Microservicios de negocio: configuración que funciona en Minikube
+    READINESS_INITIAL_DELAY="60"
+    READINESS_FAILURE_THRESHOLD="10"
+    LIVENESS_INITIAL_DELAY="120"
+    LIVENESS_FAILURE_THRESHOLD="5"
   fi
 
-  if [[ "${svc}" == "cloud-config" ]]; then
-    local active_profiles="native"
-    if [[ -n "${K8S_ENVIRONMENT}" && "${K8S_ENVIRONMENT}" != "native" ]]; then
-      active_profiles="native,${K8S_ENVIRONMENT}"
-    fi
-    extra_env_block="            - name: SPRING_PROFILES_ACTIVE
-              value: \"${active_profiles}\"
-            - name: SPRING_CLOUD_CONFIG_SERVER_NATIVE_SEARCH_LOCATIONS
-              value: \"classpath:/configs\""
-  fi
+  # Configuración embebida para todos los servicios (sin cloud-config)
+  extra_env_block="            - name: SPRING_CLOUD_CONFIG_ENABLED
+              value: \"false\"
+            - name: SPRING_PROFILES_ACTIVE
+              value: \"${K8S_ENVIRONMENT:-dev}\""
 
   cat > "${manifest}" <<EOF
 apiVersion: apps/v1
@@ -562,19 +518,18 @@ if [[ "${AVAILABLE_NODES}" -eq 0 ]]; then
 fi
 log_info "Nodos disponibles: ${AVAILABLE_NODES}"
 
-# Primera fase: desplegar service-discovery PRIMERO (cloud-config depende de esto)
+# Primera fase: desplegar service-discovery PRIMERO
 if [[ -n "${SEEN[service-discovery]:-}" ]]; then
   if [[ -z "${SERVICE_PORTS[service-discovery]+_}" ]]; then
     log_error "Servicio 'service-discovery' no está soportado por el pipeline."
     exit 1
   fi
   render_manifest "service-discovery"
-  log_info "Aplicando servicio crítico (PRIMERO): service-discovery..."
+  log_info "Aplicando servicio crítico: service-discovery..."
   kubectl --namespace "${K8S_NAMESPACE}" apply -f "${RENDER_DIR}/service-discovery.yaml"
   
-  log_info "Esperando rollout de service-discovery (dependencia crítica)..."
-  # Timeout aumentado para permitir que el probe inicial tenga suficiente tiempo (180s initial + margin)
-  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/service-discovery" --timeout="600s"; then
+  log_info "Esperando rollout de service-discovery..."
+  if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/service-discovery" --timeout="300s"; then
     log_error "El servicio service-discovery no alcanzó el estado Ready dentro del tiempo esperado."
     log_info "Estado de pods para service-discovery:"
     kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="service-discovery" -o wide
@@ -589,135 +544,12 @@ if [[ -n "${SEEN[service-discovery]:-}" ]]; then
   log_success "service-discovery está listo."
 fi
 
-# Segunda fase (después de service-discovery): desplegar cloud-config
-  if [[ -n "${SEEN[cloud-config]:-}" ]]; then
-    if [[ -z "${SERVICE_PORTS[cloud-config]+_}" ]]; then
-      log_error "Servicio 'cloud-config' no está soportado por el pipeline."
-      exit 1
-    fi
-    render_manifest "cloud-config"
-    log_info "Aplicando servicio crítico (SEGUNDO): cloud-config (después de service-discovery)..."
-    kubectl --namespace "${K8S_NAMESPACE}" apply -f "${RENDER_DIR}/cloud-config.yaml"
-    
-    log_info "Esperando rollout de cloud-config..."
-    # Timeout aumentado para permitir que el probe inicial tenga suficiente tiempo (150s initial + margin)
-    if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/cloud-config" --timeout="600s"; then
-      log_error "El servicio cloud-config no alcanzó el estado Ready dentro del tiempo esperado."
-      log_info "Estado de pods para cloud-config:"
-      kubectl --namespace "${K8S_NAMESPACE}" get pods -l app="cloud-config" -o wide
-      log_info "Eventos del deployment cloud-config:"
-      kubectl --namespace "${K8S_NAMESPACE}" describe deployment "cloud-config" | grep -A 20 "Events:" || true
-      log_info "Logs del contenedor:"
-      kubectl --namespace "${K8S_NAMESPACE}" logs -l app="cloud-config" --tail=50 2>/dev/null || true
-      log_error "Disponibilidad de recursos en cluster:"
-      kubectl top nodes 2>/dev/null || log_warn "No hay métrica de recursos disponible"
-      exit 1
-    fi
-    
-    # VERIFICACIÓN ACTIVA: cloud-config puede reportar healthy pero no estar listo para recibir requests
-    # cloud-config necesita más tiempo para abrir el puerto 9296 internamente
-    log_info "⏳ Esperando que cloud-config esté disponible en puerto 9296..."
-    
-    # Máximo 5 minutos intentando verificar disponibilidad
-    MAX_WAIT_TIME=300  # 5 minutos
-    ELAPSED=0
-    RETRY_INTERVAL=5
-    CLOUD_CONFIG_POD=""
-    
-    # Obtener el nombre del pod de cloud-config
-    while [[ -z "${CLOUD_CONFIG_POD}" && ${ELAPSED} -lt 60 ]]; do
-      CLOUD_CONFIG_POD=$(kubectl --namespace "${K8S_NAMESPACE}" get pod -l app="cloud-config" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-      if [[ -z "${CLOUD_CONFIG_POD}" ]]; then
-        sleep ${RETRY_INTERVAL}
-        ELAPSED=$((ELAPSED + RETRY_INTERVAL))
-      fi
-    done
-    
-    if [[ -z "${CLOUD_CONFIG_POD}" ]]; then
-      log_warn "No se encontró pod de cloud-config, continuando con espera fija..."
-      sleep 120
-    else
-      # Verificar que ConfigServer esté completamente listo para servir requests
-      # No solo que /actuator/health responda, sino que el ConfigServer endpoint específico esté listo
-      log_info "Verificando ConfigServer en pod: ${CLOUD_CONFIG_POD}..."
-      ELAPSED=0
-      VERIFIED=false
-      
-      while [[ ${ELAPSED} -lt ${MAX_WAIT_TIME} ]]; do
-        # Test de conectividad al ConfigServer endpoint específico que usan los clientes
-        # Intentar obtener config para service-discovery como prueba
-        if kubectl --namespace "${K8S_NAMESPACE}" exec "${CLOUD_CONFIG_POD}" -- curl -sf http://localhost:9296/service-discovery/dev > /dev/null 2>&1; then
-          log_success "✅ ConfigServer de cloud-config verificado y respondiendo en puerto 9296."
-          VERIFIED=true
-          break
-        else
-          if [[ $((ELAPSED % 30)) -eq 0 ]]; then
-            log_info "⏳ Esperando ConfigServer listo... (${ELAPSED}s / ${MAX_WAIT_TIME}s)"
-          fi
-          sleep ${RETRY_INTERVAL}
-          ELAPSED=$((ELAPSED + RETRY_INTERVAL))
-        fi
-      done
-      
-      if [[ "${VERIFIED}" != "true" ]]; then
-        log_warn "⚠️  No se pudo verificar puerto 9296 después de ${MAX_WAIT_TIME}s, continuando de todas formas..."
-        sleep 60  # Espera mínima antes de continuar
-      else
-        # Si la verificación fue exitosa, esperar tiempo adicional para estabilización
-        log_info "⏳ Esperando 90s adicionales para que ConfigServer se estabilice completamente..."
-        sleep 90
-      fi
-    fi
-    
-    log_success "cloud-config verificación completada."
-  fi
+log_info "Service Discovery listo. Desplegando servicios restantes..."
 
-log_info "Servicios críticos listos. Desplegando servicios restantes..."
-# Espera adicional CRÍTICA para asegurar que cloud-config esté 100% estable
-# y que el Service DNS esté completamente propagado en el cluster
-log_info "⏳ Esperando 60s adicionales para propagación de Service DNS..."
-sleep 60
-
-# Verificación ADICIONAL: Probar que el Service de cloud-config responde desde otro pod
-log_info "Verificando que el Service de cloud-config sea accesible vía DNS..."
-VERIFICATION_POD=""
-
-# Usar el pod de service-discovery para verificar (ya está running)
-VERIFICATION_POD=$(kubectl --namespace "${K8S_NAMESPACE}" get pod -l app="service-discovery" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-
-if [[ -n "${VERIFICATION_POD}" ]]; then
-  log_info "Probando conectividad desde ${VERIFICATION_POD} → cloud-config:9296..."
-  
-  # Intentar hasta 10 veces (50 segundos)
-  for i in {1..10}; do
-    if kubectl --namespace "${K8S_NAMESPACE}" exec "${VERIFICATION_POD}" -- curl -sf -m 5 http://cloud-config:9296/actuator/health > /dev/null 2>&1; then
-      log_success "✅ Service de cloud-config es accesible vía DNS desde otros pods."
-      break
-    else
-      if [[ $i -eq 10 ]]; then
-        log_warn "⚠️  No se pudo verificar Service DNS después de 10 intentos. Continuando de todas formas..."
-      else
-        log_info "Intento $i/10 falló, reintentando en 5s..."
-        sleep 5
-      fi
-    fi
-  done
-else
-  log_warn "No se encontró pod de verificación, saltando verificación de Service DNS."
-fi
-
-log_info "⏳ Esperando 30s finales antes de desplegar servicios dependientes..."
-sleep 30
-
-# NOTE: Ya NO necesitamos verificar el puerto 9296 porque:
-# 1. Los servicios usan fail-fast: false (opcional config-server)
-# 2. Esperamos suficiente tiempo (120s) para que cloud-config esté listo
-# 3. Si cloud-config falla, los servicios usan configuración embebida
-
-# Segunda fase: desplegar el resto de los servicios
+# Desplegar el resto de los servicios
 for svc in "${SERVICES[@]}"; do
-  if [[ "${svc}" == "cloud-config" || "${svc}" == "service-discovery" ]]; then
-    continue  # Ya fueron desplegados
+  if [[ "${svc}" == "service-discovery" ]]; then
+    continue  # Ya fue desplegado
   fi
   if [[ -z "${SERVICE_PORTS[${svc}]+_}" ]]; then
     log_error "Servicio '${svc}' no está soportado por el pipeline."
@@ -732,23 +564,17 @@ for svc in "${SERVICES[@]}"; do
 done
 
 for svc in "${SERVICES[@]}"; do
-  # Saltar servicios críticos que ya fueron esperados en fase 1
-  if [[ "${svc}" == "cloud-config" || "${svc}" == "service-discovery" ]]; then
+  # Saltar service-discovery que ya fue esperado
+  if [[ "${svc}" == "service-discovery" ]]; then
     continue
   fi
   
   log_info "Esperando rollout de ${svc}..."
-  # Timeout ajustado para permitir que los probes tengan suficiente tiempo (130s initial + margin)
-  TIMEOUT="480s"
+  # Timeout optimizado basado en la configuración exitosa de Minikube
+  TIMEOUT="300s"
   
-  # API Gateway necesita más tiempo porque tiene initialDelaySeconds=200s + reintentos de conexión a cloud-config
-  if [[ "${svc}" == "api-gateway" ]]; then
-    TIMEOUT="720s"  # 12 minutos: 200s initial + 100 failures * 5s = ~700s max
-    log_info "⚠️  api-gateway requiere más tiempo (${TIMEOUT}) debido a dependencia con cloud-config"
-  elif [[ "${svc}" == "proxy-client" ]]; then
-    TIMEOUT="600s"  # 10 minutos: 60s initial + 20 failures * 5s = ~160s max, pero dar margen
-    log_info "⚠️  proxy-client requiere más tiempo (${TIMEOUT}) para estabilizar readiness probe"
-  fi
+  # Todos los microservicios usan la misma configuración optimizada
+  log_info "⏳ ${svc}: Usando timeout optimizado (${TIMEOUT})"
   
   if ! kubectl --namespace "${K8S_NAMESPACE}" rollout status "deployment/${svc}" --timeout="${TIMEOUT}"; then
     log_error "El despliegue de ${svc} no alcanzó el estado Ready dentro del tiempo esperado."

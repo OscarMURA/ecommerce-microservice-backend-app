@@ -15,7 +15,7 @@ pipeline {
     booleanParam(name: 'DEPLOY_TO_K8S', defaultValue: false, description: 'Desplegar servicios en Kubernetes al finalizar las pruebas')
     choice(name: 'K8S_ENVIRONMENT', choices: ['dev', 'staging', 'prod'], description: 'Etiqueta de ambiente para los recursos de Kubernetes')
     string(name: 'K8S_NAMESPACE', defaultValue: 'ecommerce', description: 'Namespace de Kubernetes donde se desplegarán los servicios')
-    string(name: 'K8S_SERVICES', defaultValue: 'cloud-config service-discovery api-gateway proxy-client user-service product-service favourite-service order-service shipping-service payment-service', description: 'Servicios a desplegar (separados por espacio o coma)')
+    string(name: 'K8S_SERVICES', defaultValue: 'service-discovery user-service product-service favourite-service order-service shipping-service payment-service', description: 'Servicios a desplegar (separados por espacio o coma)')
     string(name: 'GKE_CLUSTER_NAME', defaultValue: 'ecommerce-dev-gke-v2', description: 'Nombre del cluster GKE')
     string(name: 'GKE_LOCATION', defaultValue: 'us-central1-a', description: 'Zona o región del cluster GKE')
     string(name: 'K8S_IMAGE_REGISTRY', defaultValue: 'gcr.io/devops-activity', description: 'Registro de contenedores (p. ej. gcr.io/proyecto)')
