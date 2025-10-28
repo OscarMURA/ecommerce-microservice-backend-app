@@ -249,6 +249,10 @@ pipeline {
           script {
             echo "🏥 Ejecutando health checks..."
             
+            // Esperar a que los servicios estén completamente listos
+            echo "⏳ Esperando 60 segundos para que los servicios se inicialicen completamente..."
+            sleep(time: 60, unit: 'SECONDS')
+            
             def healthCheckResults = [:]
             def services = [
               'service-discovery': '8761',
@@ -262,10 +266,11 @@ pipeline {
             
             services.each { service, port ->
               try {
+                // Intentar health check con timeout
                 def healthResult = sh(
                   script: """
                     sshpass -p "${VM_PASSWORD}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenkins@${env.VM_IP} "
-                      kubectl exec -n ${env.NAMESPACE} deployment/${service} -- curl -s http://localhost:${port}/actuator/health || echo 'HEALTH_CHECK_FAILED'
+                      timeout 30 kubectl exec -n ${env.NAMESPACE} deployment/${service} -- curl -s --max-time 10 http://localhost:${port}/actuator/health 2>/dev/null || echo 'HEALTH_CHECK_FAILED'
                     "
                   """,
                   returnStdout: true
@@ -274,6 +279,9 @@ pipeline {
                 if (healthResult.contains('"status":"UP"')) {
                   healthCheckResults[service] = 'UP'
                   echo "✅ ${service}: UP"
+                } else if (healthResult.contains('HEALTH_CHECK_FAILED')) {
+                  healthCheckResults[service] = 'DOWN'
+                  echo "❌ ${service}: DOWN - Health check failed"
                 } else {
                   healthCheckResults[service] = 'DOWN'
                   echo "❌ ${service}: DOWN - ${healthResult}"
@@ -285,7 +293,8 @@ pipeline {
             }
             
             // Guardar resultados de health checks
-            writeFile file: 'health-check-results.json', text: groovy.json.JsonBuilder(healthCheckResults).toPrettyString()
+            def jsonBuilder = new groovy.json.JsonBuilder(healthCheckResults)
+            writeFile file: 'health-check-results.json', text: jsonBuilder.toPrettyString()
             
             // Verificar si todos los servicios están UP
             def allServicesUp = healthCheckResults.values().every { it == 'UP' }
