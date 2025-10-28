@@ -255,22 +255,24 @@ pipeline {
             
             def healthCheckResults = [:]
             def services = [
-              'service-discovery': '8761',
-              'order-service': '8081',
-              'payment-service': '8082',
-              'product-service': '8083',
-              'shipping-service': '8084',
-              'user-service': '8085',
-              'favourite-service': '8086'
+              'service-discovery': ['8761', ''],
+              'order-service': ['8081', '/order-service'],
+              'payment-service': ['8082', '/payment-service'],
+              'product-service': ['8083', '/product-service'],
+              'shipping-service': ['8084', '/shipping-service'],
+              'user-service': ['8085', '/user-service'],
+              'favourite-service': ['8086', '/favourite-service']
             ]
             
-            services.each { service, port ->
+            services.each { service, config ->
+              def port = config[0]
+              def path = config[1]
               try {
                 // Intentar health check con timeout
                 def healthResult = sh(
                   script: """
                     sshpass -p "${VM_PASSWORD}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenkins@${env.VM_IP} "
-                      timeout 30 kubectl exec -n ${env.NAMESPACE} deployment/${service} -- curl -s --max-time 10 http://localhost:${port}/actuator/health 2>/dev/null || echo 'HEALTH_CHECK_FAILED'
+                      timeout 30 kubectl exec -n ${env.NAMESPACE} deployment/${service} -- curl -s --max-time 10 http://localhost:${port}${path}/actuator/health 2>/dev/null || echo 'HEALTH_CHECK_FAILED'
                     "
                   """,
                   returnStdout: true
@@ -293,8 +295,12 @@ pipeline {
             }
             
             // Guardar resultados de health checks
-            def jsonBuilder = new groovy.json.JsonBuilder(healthCheckResults)
-            writeFile file: 'health-check-results.json', text: jsonBuilder.toPrettyString()
+            def jsonString = "{"
+            healthCheckResults.each { service, status ->
+              jsonString += "\"${service}\": \"${status}\","
+            }
+            jsonString = jsonString.substring(0, jsonString.length() - 1) + "}"
+            writeFile file: 'health-check-results.json', text: jsonString
             
             // Verificar si todos los servicios están UP
             def allServicesUp = healthCheckResults.values().every { it == 'UP' }
