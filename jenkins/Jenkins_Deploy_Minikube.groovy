@@ -278,7 +278,7 @@ pipeline {
                   returnStdout: true
                 ).trim()
                 
-                if (healthResult.contains('"status":"UP"')) {
+                if (healthResult.contains('"status" : "UP"') || healthResult.contains('"status":"UP"')) {
                   healthCheckResults[service] = 'UP'
                   echo "✅ ${service}: UP"
                 } else if (healthResult.contains('HEALTH_CHECK_FAILED')) {
