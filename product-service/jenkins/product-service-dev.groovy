@@ -27,6 +27,7 @@ pipeline {
     REMOTE_BASE = "/opt/ecommerce-app"
     REMOTE_DIR = "/opt/ecommerce-app/backend"
     SERVICE_NAME = "product-service"
+    GITHUB_TOKEN = credentials('github-token')
   }
 
   stages {
@@ -695,9 +696,29 @@ jenkins/scripts/deploy-single-service-to-gke.sh
   post {
     success {
       echo "✅ product-service-dev completado. Resultados almacenados en reports/test-reports-product-service.tar.gz (si aplica)."
+      script {
+        try {
+          sh("""curl -X POST "https://api.github.com/repos/OscarMURA/ecommerce-microservice-backend-app/statuses/${env.GIT_COMMIT}" \\
+            -H "Authorization: token \${GITHUB_TOKEN}" \\
+            -H "Content-Type: application/json" \\
+            -d '{"state":"success","description":"Jenkins: Build passed","context":"ci/jenkins/product-service"}'""")
+        } catch (Exception e) {
+          echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
+        }
+      }
     }
     failure {
       echo "❌ product-service-dev falló. Revisa los logs para detalles."
+      script {
+        try {
+          sh("""curl -X POST "https://api.github.com/repos/OscarMURA/ecommerce-microservice-backend-app/statuses/${env.GIT_COMMIT}" \\
+            -H "Authorization: token \${GITHUB_TOKEN}" \\
+            -H "Content-Type: application/json" \\
+            -d '{"state":"failure","description":"Jenkins: Build failed","context":"ci/jenkins/product-service"}'""")
+        } catch (Exception e) {
+          echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
+        }
+      }
     }
     always {
       cleanWs()

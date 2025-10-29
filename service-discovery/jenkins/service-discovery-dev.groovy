@@ -27,6 +27,7 @@ pipeline {
     REMOTE_BASE = "/opt/ecommerce-app"
     REMOTE_DIR = "/opt/ecommerce-app/backend"
     SERVICE_NAME = "service-discovery"
+    GITHUB_TOKEN = credentials('github-token')
   }
 
   stages {
@@ -695,9 +696,29 @@ jenkins/scripts/deploy-single-service-to-gke.sh
   post {
     success {
       echo "✅ service-discovery-dev completado. Resultados almacenados en reports/test-reports-service-discovery.tar.gz (si aplica)."
+      script {
+        try {
+          sh("""curl -X POST "https://api.github.com/repos/OscarMURA/ecommerce-microservice-backend-app/statuses/${env.GIT_COMMIT}" \\
+            -H "Authorization: token \${GITHUB_TOKEN}" \\
+            -H "Content-Type: application/json" \\
+            -d '{"state":"success","description":"Jenkins: Build passed","context":"ci/jenkins/service-discovery"}'""")
+        } catch (Exception e) {
+          echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
+        }
+      }
     }
     failure {
       echo "❌ service-discovery-dev falló. Revisa los logs para detalles."
+      script {
+        try {
+          sh("""curl -X POST "https://api.github.com/repos/OscarMURA/ecommerce-microservice-backend-app/statuses/${env.GIT_COMMIT}" \\
+            -H "Authorization: token \${GITHUB_TOKEN}" \\
+            -H "Content-Type: application/json" \\
+            -d '{"state":"failure","description":"Jenkins: Build failed","context":"ci/jenkins/service-discovery"}'""")
+        } catch (Exception e) {
+          echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
+        }
+      }
     }
     always {
       cleanWs()
