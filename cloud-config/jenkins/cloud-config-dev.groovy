@@ -690,3 +690,15 @@ jenkins/scripts/deploy-single-service-to-gke.sh
     }
   }
 }
+  post {
+    success {
+      echo "✅ cloud-config-dev completado. Resultados almacenados en reports/test-reports-cloud-config.tar.gz (si aplica)."
+    }
+    failure {
+      echo "❌ cloud-config-dev falló. Revisa los logs para detalles."
+    }
+    always {
+      cleanWs()
+    }
+  }
+}

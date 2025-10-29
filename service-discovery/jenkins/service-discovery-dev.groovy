@@ -684,3 +684,15 @@ jenkins/scripts/deploy-single-service-to-gke.sh
     }
   }
 }
+  post {
+    success {
+      echo "✅ service-discovery-dev completado. Resultados almacenados en reports/test-reports-service-discovery.tar.gz (si aplica)."
+    }
+    failure {
+      echo "❌ service-discovery-dev falló. Revisa los logs para detalles."
+    }
+    always {
+      cleanWs()
+    }
+  }
+}

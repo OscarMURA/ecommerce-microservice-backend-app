@@ -684,3 +684,15 @@ jenkins/scripts/deploy-single-service-to-gke.sh
     }
   }
 }
+  post {
+    success {
+      echo "✅ favourite-service-dev completado. Resultados almacenados en reports/test-reports-favourite-service.tar.gz (si aplica)."
+    }
+    failure {
+      echo "❌ favourite-service-dev falló. Revisa los logs para detalles."
+    }
+    always {
+      cleanWs()
+    }
+  }
+}

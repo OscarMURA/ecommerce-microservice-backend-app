@@ -684,3 +684,15 @@ jenkins/scripts/deploy-single-service-to-gke.sh
     }
   }
 }
+  post {
+    success {
+      echo "✅ shipping-service-dev completado. Resultados almacenados en reports/test-reports-shipping-service.tar.gz (si aplica)."
+    }
+    failure {
+      echo "❌ shipping-service-dev falló. Revisa los logs para detalles."
+    }
+    always {
+      cleanWs()
+    }
+  }
+}

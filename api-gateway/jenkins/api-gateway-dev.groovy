@@ -691,3 +691,15 @@ jenkins/scripts/deploy-single-service-to-gke.sh
     }
   }
 }
+  post {
+    success {
+      echo "✅ api-gateway-dev completado. Resultados almacenados en reports/test-reports-api-gateway.tar.gz (si aplica)."
+    }
+    failure {
+      echo "❌ api-gateway-dev falló. Revisa los logs para detalles."
+    }
+    always {
+      cleanWs()
+    }
+  }
+}

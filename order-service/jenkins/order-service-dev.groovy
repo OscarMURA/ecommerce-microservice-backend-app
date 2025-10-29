@@ -684,3 +684,15 @@ jenkins/scripts/deploy-single-service-to-gke.sh
     }
   }
 }
+  post {
+    success {
+      echo "✅ order-service-dev completado. Resultados almacenados en reports/test-reports-order-service.tar.gz (si aplica)."
+    }
+    failure {
+      echo "❌ order-service-dev falló. Revisa los logs para detalles."
+    }
+    always {
+      cleanWs()
+    }
+  }
+}
