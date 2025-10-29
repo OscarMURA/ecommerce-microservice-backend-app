@@ -108,13 +108,6 @@ pipeline {
         }
       }
     }
-      steps {
-        checkout scm
-        script {
-          echo "Workspace: ${env.WORKSPACE}"
-        }
-      }
-    }
 
     stage('Ensure VM Available') {
       steps {
