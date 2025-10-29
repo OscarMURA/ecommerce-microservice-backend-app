@@ -647,9 +647,43 @@ jenkins/scripts/deploy-single-service-to-gke.sh
   post {
     success {
       echo "✅ cloud-config-dev completado. Resultados almacenados en reports/test-reports-cloud-config.tar.gz (si aplica)."
+      script {
+        if (env.GIT_BRANCH) {
+          try {
+            step([$class: 'GitHubCommitStatusSetter',
+              reposSource: [$class: 'ManuallyEnteredRepositorySource', url: 'https://github.com/OscarMURA/ecommerce-microservice-backend-app.git'],
+              commitShaSource: [$class: 'StringSource', sha: env.GIT_COMMIT],
+              contextSource: [$class: 'ManuallyEnteredCommitContextSource', context: 'ci/jenkins/cloud-config'],
+              errorHandlers: [[$class: 'ShallowAnyErrorHandler']],
+              statusResultSource: [$class: 'ConditionalStatusResultSource',
+                results: [[$class: 'AnyBuildResult', message: 'Build completed', state: 'SUCCESS']]
+              ]
+            ])
+          } catch (Exception e) {
+            echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
+          }
+        }
+      }
     }
     failure {
       echo "❌ cloud-config-dev falló. Revisa los logs para detalles."
+      script {
+        if (env.GIT_BRANCH) {
+          try {
+            step([$class: 'GitHubCommitStatusSetter',
+              reposSource: [$class: 'ManuallyEnteredRepositorySource', url: 'https://github.com/OscarMURA/ecommerce-microservice-backend-app.git'],
+              commitShaSource: [$class: 'StringSource', sha: env.GIT_COMMIT],
+              contextSource: [$class: 'ManuallyEnteredCommitContextSource', context: 'ci/jenkins/cloud-config'],
+              errorHandlers: [[$class: 'ShallowAnyErrorHandler']],
+              statusResultSource: [$class: 'ConditionalStatusResultSource',
+                results: [[$class: 'AnyBuildResult', message: 'Build failed', state: 'FAILURE']]
+              ]
+            ])
+          } catch (Exception e) {
+            echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
+          }
+        }
+      }
     }
     always {
       cleanWs()

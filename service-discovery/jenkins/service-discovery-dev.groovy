@@ -641,9 +641,43 @@ jenkins/scripts/deploy-single-service-to-gke.sh
   post {
     success {
       echo "✅ service-discovery-dev completado. Resultados almacenados en reports/test-reports-service-discovery.tar.gz (si aplica)."
+      script {
+        if (env.GIT_BRANCH) {
+          try {
+            step([$class: 'GitHubCommitStatusSetter',
+              reposSource: [$class: 'ManuallyEnteredRepositorySource', url: 'https://github.com/OscarMURA/ecommerce-microservice-backend-app.git'],
+              commitShaSource: [$class: 'StringSource', sha: env.GIT_COMMIT],
+              contextSource: [$class: 'ManuallyEnteredCommitContextSource', context: 'ci/jenkins/service-discovery'],
+              errorHandlers: [[$class: 'ShallowAnyErrorHandler']],
+              statusResultSource: [$class: 'ConditionalStatusResultSource',
+                results: [[$class: 'AnyBuildResult', message: 'Build completed', state: 'SUCCESS']]
+              ]
+            ])
+          } catch (Exception e) {
+            echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
+          }
+        }
+      }
     }
     failure {
       echo "❌ service-discovery-dev falló. Revisa los logs para detalles."
+      script {
+        if (env.GIT_BRANCH) {
+          try {
+            step([$class: 'GitHubCommitStatusSetter',
+              reposSource: [$class: 'ManuallyEnteredRepositorySource', url: 'https://github.com/OscarMURA/ecommerce-microservice-backend-app.git'],
+              commitShaSource: [$class: 'StringSource', sha: env.GIT_COMMIT],
+              contextSource: [$class: 'ManuallyEnteredCommitContextSource', context: 'ci/jenkins/service-discovery'],
+              errorHandlers: [[$class: 'ShallowAnyErrorHandler']],
+              statusResultSource: [$class: 'ConditionalStatusResultSource',
+                results: [[$class: 'AnyBuildResult', message: 'Build failed', state: 'FAILURE']]
+              ]
+            ])
+          } catch (Exception e) {
+            echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
+          }
+        }
+      }
     }
     always {
       cleanWs()

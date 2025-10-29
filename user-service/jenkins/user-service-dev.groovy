@@ -695,9 +695,45 @@ jenkins/scripts/deploy-single-service-to-gke.sh
   post {
     success {
       echo "✅ user-service-dev completado. Resultados almacenados en reports/test-reports-user-service.tar.gz (si aplica)."
+      script {
+        // Notificar estado de éxito a GitHub
+        if (env.GIT_BRANCH) {
+          try {
+            step([$class: 'GitHubCommitStatusSetter',
+              reposSource: [$class: 'ManuallyEnteredRepositorySource', url: 'https://github.com/OscarMURA/ecommerce-microservice-backend-app.git'],
+              commitShaSource: [$class: 'StringSource', sha: env.GIT_COMMIT],
+              contextSource: [$class: 'ManuallyEnteredCommitContextSource', context: 'ci/jenkins/user-service'],
+              errorHandlers: [[$class: 'ShallowAnyErrorHandler']],
+              statusResultSource: [$class: 'ConditionalStatusResultSource',
+                results: [[$class: 'AnyBuildResult', message: 'Build completed', state: 'SUCCESS']]
+              ]
+            ])
+          } catch (Exception e) {
+            echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
+          }
+        }
+      }
     }
     failure {
       echo "❌ user-service-dev falló. Revisa los logs para detalles."
+      script {
+        // Notificar estado de fallo a GitHub
+        if (env.GIT_BRANCH) {
+          try {
+            step([$class: 'GitHubCommitStatusSetter',
+              reposSource: [$class: 'ManuallyEnteredRepositorySource', url: 'https://github.com/OscarMURA/ecommerce-microservice-backend-app.git'],
+              commitShaSource: [$class: 'StringSource', sha: env.GIT_COMMIT],
+              contextSource: [$class: 'ManuallyEnteredCommitContextSource', context: 'ci/jenkins/user-service'],
+              errorHandlers: [[$class: 'ShallowAnyErrorHandler']],
+              statusResultSource: [$class: 'ConditionalStatusResultSource',
+                results: [[$class: 'AnyBuildResult', message: 'Build failed', state: 'FAILURE']]
+              ]
+            ])
+          } catch (Exception e) {
+            echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
+          }
+        }
+      }
     }
     always {
       cleanWs()
