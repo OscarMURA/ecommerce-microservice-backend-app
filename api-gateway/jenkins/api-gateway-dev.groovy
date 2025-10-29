@@ -355,7 +355,7 @@ PY
 }
 
 echo "➡️ Ejecutando pruebas unitarias para $SERVICE_NAME"
-./mvnw -B -pl "$SERVICE_NAME" test -Dtest='*ApplicationTests' -DfailIfNoTests=false
+./mvnw -B -pl "$SERVICE_NAME" test -Dtest='*ServiceImplTest' -DfailIfNoTests=false
 summarize_reports "$SERVICE_NAME"
 EOF
 ''')
