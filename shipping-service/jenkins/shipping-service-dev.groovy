@@ -54,6 +54,7 @@ pipeline {
           echo "Workspace: ${env.WORKSPACE}"
         }
       }
+    }
 
     stage('Check for Service Changes') {
       steps {
