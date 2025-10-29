@@ -64,45 +64,99 @@ pipeline {
           
           echo "🔍 Verificando cambios en ${env.SERVICE_NAME}..."
           
+          // Obtener la lista de archivos cambiados comparando con el commit anterior
           try {
+            // Para multibranch pipelines, usar GIT_PREVIOUS_SUCCESSFUL_COMMIT si está disponible
             if (env.GIT_PREVIOUS_SUCCESSFUL_COMMIT && env.GIT_PREVIOUS_SUCCESSFUL_COMMIT != env.GIT_COMMIT) {
               echo "📊 Comparando con commit previo exitoso: ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT}"
-              changedFiles = sh(script: "git diff --name-only ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT} ${env.GIT_COMMIT}", returnStdout: true).trim().split('\n').findAll { it?.trim() }
+              changedFiles = sh(
+                script: "git diff --name-only ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT} ${env.GIT_COMMIT}",
+                returnStdout: true
+              ).trim().split('\n').findAll { it?.trim() }
             } else {
+              // Comparar con el commit anterior (HEAD~1)
               echo "📊 Comparando con commit anterior (HEAD~1)"
-              def commitCount = sh(script: "git rev-list --count HEAD", returnStdout: true).trim().toInteger()
+              def commitCount = sh(
+                script: "git rev-list --count HEAD",
+                returnStdout: true
+              ).trim().toInteger()
+              
               if (commitCount > 1) {
-                changedFiles = sh(script: "git diff --name-only HEAD~1 HEAD", returnStdout: true).trim().split('\n').findAll { it?.trim() }
+                changedFiles = sh(
+                  script: "git diff --name-only HEAD~1 HEAD",
+                  returnStdout: true
+                ).trim().split('\n').findAll { it?.trim() }
               } else {
-                changedFiles = sh(script: "git ls-tree -r --name-only HEAD", returnStdout: true).trim().split('\n').findAll { it?.trim() }
+                // Si es el primer commit, todos los archivos son "nuevos"
+                changedFiles = sh(
+                  script: "git ls-tree -r --name-only HEAD",
+                  returnStdout: true
+                ).trim().split('\n').findAll { it?.trim() }
               }
             }
           } catch (Exception e) {
             echo "⚠️ No se pudo comparar con commit anterior: ${e.message}"
             echo "🔄 Usando todos los archivos del commit actual..."
-            changedFiles = sh(script: "git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null || git ls-tree -r --name-only HEAD", returnStdout: true).trim().split('\n').findAll { it?.trim() }
+            // Si falla, asumir que hay cambios (mejor ejecutar que omitir)
+            changedFiles = sh(
+              script: "git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null || git ls-tree -r --name-only HEAD",
+              returnStdout: true
+            ).trim().split('\n').findAll { it?.trim() }
           }
+          
           echo "📋 Archivos modificados en este commit (${changedFiles.size()} archivos):"
-          changedFiles.take(10).each { file -> echo "   - ${file}" }
-          if (changedFiles.size() > 10) { echo "   ... y ${changedFiles.size() - 10} archivos más" }
-          def hasServiceChanges = changedFiles.any { file -> file.startsWith(serviceDir) }
-          def hasSharedChanges = changedFiles.any { file -> file == 'pom.xml' || file.startsWith('jenkins/') || file.startsWith('.github/') }
+          changedFiles.take(10).each { file ->
+            echo "   - ${file}"
+          }
+          if (changedFiles.size() > 10) {
+            echo "   ... y ${changedFiles.size() - 10} archivos más"
+          }
+          
+          // Verificar si hay cambios en el directorio del servicio o en archivos compartidos
+          def hasServiceChanges = changedFiles.any { file -> 
+            file.startsWith(serviceDir)
+          }
+          
+          // También considerar cambios en archivos compartidos (pom.xml padre, etc.)
+          def hasSharedChanges = changedFiles.any { file ->
+            file == 'pom.xml' || // POM padre afecta a todos
+            file.startsWith('jenkins/') || // Cambios en pipelines compartidos
+            file.startsWith('.github/') // Cambios en workflows de GitHub
+          }
+          
           if (!hasServiceChanges && !hasSharedChanges && changedFiles.size() > 0) {
             echo "ℹ️ No se detectaron cambios en ${env.SERVICE_NAME}"
+            echo "📋 Archivos modificados pertenecen a otros servicios:"
+            changedFiles.findAll { !it.startsWith(serviceDir) && it != 'pom.xml' && !it.startsWith('jenkins/') }.each { file ->
+              echo "   - ${file}"
+            }
             echo "✅ Pipeline se omite porque no hay cambios relevantes en ${env.SERVICE_NAME}"
             currentBuild.result = 'SUCCESS'
-            catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') { error("Pipeline omitido exitosamente - no hay cambios en ${env.SERVICE_NAME}") }
+            // Usar catchError para marcar como éxito pero detener la ejecución
+            catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
+              error("Pipeline omitido exitosamente - no hay cambios en ${env.SERVICE_NAME}")
+            }
             return
           } else if (changedFiles.size() == 0) {
             echo "ℹ️ No se detectaron cambios en el repositorio"
             echo "✅ Pipeline se omite porque no hay cambios"
             currentBuild.result = 'SUCCESS'
-            catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') { error("Pipeline omitido exitosamente - no hay cambios en el repositorio") }
+            catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
+              error("Pipeline omitido exitosamente - no hay cambios en el repositorio")
+            }
             return
           } else {
             echo "✅ Cambios detectados relevantes para ${env.SERVICE_NAME}:"
-            if (hasServiceChanges) { changedFiles.findAll { it.startsWith(serviceDir) }.each { file -> echo "   ✓ ${file}" } }
-            if (hasSharedChanges) { changedFiles.findAll { it == 'pom.xml' || it.startsWith('jenkins/') }.each { file -> echo "   ✓ ${file} (archivo compartido)" } }
+            if (hasServiceChanges) {
+              changedFiles.findAll { it.startsWith(serviceDir) }.each { file ->
+                echo "   ✓ ${file}"
+              }
+            }
+            if (hasSharedChanges) {
+              changedFiles.findAll { it == 'pom.xml' || it.startsWith('jenkins/') }.each { file ->
+                echo "   ✓ ${file} (archivo compartido)"
+              }
+            }
             echo "🚀 Continuando con el pipeline..."
           }
         }
@@ -638,52 +692,6 @@ jenkins/scripts/deploy-single-service-to-gke.sh
     }
   }
 
-  post {
-    success {
-      echo "✅ order-service-dev completado. Resultados almacenados en reports/test-reports-order-service.tar.gz (si aplica)."
-      script {
-        if (env.GIT_BRANCH) {
-          try {
-            step([$class: 'GitHubCommitStatusSetter',
-              reposSource: [$class: 'ManuallyEnteredRepositorySource', url: 'https://github.com/OscarMURA/ecommerce-microservice-backend-app.git'],
-              commitShaSource: [$class: 'StringSource', sha: env.GIT_COMMIT],
-              contextSource: [$class: 'ManuallyEnteredCommitContextSource', context: 'ci/jenkins/order-service'],
-              errorHandlers: [[$class: 'ShallowAnyErrorHandler']],
-              statusResultSource: [$class: 'ConditionalStatusResultSource',
-                results: [[$class: 'AnyBuildResult', message: 'Build completed', state: 'SUCCESS']]
-              ]
-            ])
-          } catch (Exception e) {
-            echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
-          }
-        }
-      }
-    }
-    failure {
-      echo "❌ order-service-dev falló. Revisa los logs para detalles."
-      script {
-        if (env.GIT_BRANCH) {
-          try {
-            step([$class: 'GitHubCommitStatusSetter',
-              reposSource: [$class: 'ManuallyEnteredRepositorySource', url: 'https://github.com/OscarMURA/ecommerce-microservice-backend-app.git'],
-              commitShaSource: [$class: 'StringSource', sha: env.GIT_COMMIT],
-              contextSource: [$class: 'ManuallyEnteredCommitContextSource', context: 'ci/jenkins/order-service'],
-              errorHandlers: [[$class: 'ShallowAnyErrorHandler']],
-              statusResultSource: [$class: 'ConditionalStatusResultSource',
-                results: [[$class: 'AnyBuildResult', message: 'Build failed', state: 'FAILURE']]
-              ]
-            ])
-          } catch (Exception e) {
-            echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
-          }
-        }
-      }
-    }
-    always {
-      cleanWs()
-    }
-  }
-}
   post {
     success {
       echo "✅ order-service-dev completado. Resultados almacenados en reports/test-reports-order-service.tar.gz (si aplica)."
