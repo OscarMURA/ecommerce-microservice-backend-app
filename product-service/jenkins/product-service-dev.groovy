@@ -172,13 +172,15 @@ pipeline {
             def fetchIp = { vmName ->
               sh(script: """
 set -e
-curl -sS -H \"Authorization: Bearer ${DO_TOKEN}\" \"https://api.digitalocean.com/v2/droplets?per_page=200\" \
+curl -sS -H "Authorization: Bearer ${DO_TOKEN}" "https://api.digitalocean.com/v2/droplets?per_page=200" \
   | jq -r --arg NAME \"${vmName}\" '.droplets[] | select(.name==\$NAME) | .networks.v4[] | select(.type==\"public\") | .ip_address' \
   | head -n1
 """, returnStdout: true).trim()
             }
 
-            def currentIp = fetchIp()
+            def buildIp = fetchIp(params.VM_NAME)
+            def minikubeIp = fetchIp(params.MINIKUBE_VM_NAME)
+            def currentIp = buildIp
             if (!currentIp) {
               echo "No se encontró la VM ${params.VM_NAME}. Solicitando creación..."
               def baseJob = params.JENKINS_CREATE_VM_JOB?.trim() ?: ''
@@ -231,15 +233,35 @@ curl -sS -H \"Authorization: Bearer ${DO_TOKEN}\" \"https://api.digitalocean.com
                 error "No se pudo invocar el pipeline Jenkins_Create_VM. Revisa el parámetro 'JENKINS_CREATE_VM_JOB' o proporciona un sufijo válido (p. ej. '${suggestion}'). Último error: ${lastError?.message}"
               }
               sleep(time: 30, unit: 'SECONDS')
-              currentIp = fetchIp()
+              currentIp = fetchIp(params.VM_NAME)
             }
 
             if (!currentIp) {
               error "No se pudo obtener la IP pública de ${params.VM_NAME} después de intentar crearla."
             }
 
-            env.DROPLET_IP = currentIp
-            echo "VM disponible en IP ${env.DROPLET_IP}"
+            // Si no hay Minikube IP, intentar crearla también
+            if (!minikubeIp) {
+              echo "No se encontró la VM ${params.MINIKUBE_VM_NAME}. Solicitando creación..."
+              def candidate = params.JENKINS_CREATE_VM_JOB?.trim() ?: ''
+              if (candidate) {
+                try {
+                  build job: candidate, wait: true, propagate: true, parameters: [
+                    string(name: 'ACTION', value: 'create'),
+                    string(name: 'VM_CONFIG', value: 'ecommerce_minikube'),
+                    booleanParam(name: 'ARCHIVE_METADATA', value: true)
+                  ]
+                } catch (Exception ex) { echo "No se pudo crear VM minikube: ${ex.message}" }
+                sleep(time: 30, unit: 'SECONDS')
+                minikubeIp = fetchIp(params.MINIKUBE_VM_NAME)
+              }
+            }
+
+            env.DROPLET_IP = buildIp
+            env.BUILD_VM_IP = buildIp
+            env.MINIKUBE_VM_IP = minikubeIp
+            echo "BUILD VM IP: ${env.BUILD_VM_IP}"
+            echo "MINIKUBE VM IP: ${env.MINIKUBE_VM_IP}"
           }
         }
       }
