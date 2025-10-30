@@ -935,8 +935,6 @@ jenkins/scripts/deploy-single-service-to-gke.sh
         }
       }
     }
-  }
-
     stage('Wait for Service Discovery') {
       when {
         expression { env.SERVICE_NAME != 'service-discovery' && (params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean()) }
