@@ -566,48 +566,53 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenki
 set -e
 export SSHPASS="$VM_PASSWORD"
 
-echo "🔨 Construyendo imagen Docker en la VM para Minikube..."
+# --- CONSTRUCCIÓN Y EMPAQUETADO EN VM BUILD ---
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   jenkins@"$TARGET_IP" "REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOFBUILD'
 set -euo pipefail
-
 cd "$REMOTE_DIR"
-
 SERVICE_DIR="$REMOTE_DIR/$SERVICE_NAME"
 DOCKERFILE_PATH="$SERVICE_DIR/Dockerfile"
-
 if [ ! -d "$SERVICE_DIR" ]; then
   echo "❌ Error: Directorio $SERVICE_DIR no existe"
   exit 1
 fi
-
 if [ ! -f "$DOCKERFILE_PATH" ]; then
   echo "❌ Error: Dockerfile no encontrado en $DOCKERFILE_PATH"
   exit 1
 fi
-
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "🔨 Construyendo: $SERVICE_NAME para Minikube"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-# Construir imagen con tag minikube
 docker build -t "${SERVICE_NAME}:minikube" "$REMOTE_DIR" \
   -f "$DOCKERFILE_PATH" \
   --build-arg SERVICE_NAME="$SERVICE_NAME" \
   --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
-  || {
-    echo "❌ Error construyendo $SERVICE_NAME"
-    exit 1
-  }
-
-echo "📦 Cargando imagen a Minikube..."
-minikube image load "${SERVICE_NAME}:minikube" || {
-  echo "❌ Error cargando imagen a Minikube"
-  exit 1
-}
-
-echo "✅ Imagen construida y cargada exitosamente a Minikube"
+  || { echo "❌ Error construyendo $SERVICE_NAME"; exit 1; }
+echo "📦 Empaquetando imagen..."
+docker save "${SERVICE_NAME}:minikube" | gzip > "/tmp/${SERVICE_NAME}-minikube.tar.gz"
 EOFBUILD
+
+# --- TRANSFIERE: DE VM BUILD A JENKINS ---
+sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$TARGET_IP":"/tmp/${SERVICE_NAME}-minikube.tar.gz" \
+  ./
+
+# --- TRANSFIERE: DE JENKINS A VM MINIKUBE ---
+sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  "./${SERVICE_NAME}-minikube.tar.gz" \
+  jenkins@"$MINIKUBE_IP":"/tmp/${SERVICE_NAME}-minikube.tar.gz"
+
+# --- CARGA IMAGEN EN MINIKUBE ---
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$MINIKUBE_IP" "bash -s" <<'EOFLOAD'
+set -euo pipefail
+export PATH="/usr/local/bin:$PATH"
+docker load -i "/tmp/${SERVICE_NAME}-minikube.tar.gz"
+/usr/local/bin/minikube image load "${SERVICE_NAME}:minikube"
+rm -f "/tmp/${SERVICE_NAME}-minikube.tar.gz"
+echo "✅ Imagen disponible en Minikube"
+EOFLOAD
 '''
               }
             }
