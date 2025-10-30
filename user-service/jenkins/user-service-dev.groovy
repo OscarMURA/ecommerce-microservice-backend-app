@@ -33,6 +33,7 @@ pipeline {
   }
 
   stages {
+
     stage('Validate Branch') {
       steps {
         script {
@@ -53,9 +54,7 @@ pipeline {
     stage('Checkout Pipeline Repo') {
       steps {
         checkout scm
-        script {
-          echo "Workspace: ${env.WORKSPACE}"
-        }
+        script { echo "Workspace: ${env.WORKSPACE}" }
       }
     }
 
@@ -64,12 +63,10 @@ pipeline {
         script {
           def serviceDir = "${env.SERVICE_NAME}/"
           def changedFiles = []
-          
+
           echo "🔍 Verificando cambios en ${env.SERVICE_NAME}..."
-          
-          // Obtener la lista de archivos cambiados comparando con el commit anterior
+
           try {
-            // Para multibranch pipelines, usar GIT_PREVIOUS_SUCCESSFUL_COMMIT si está disponible
             if (env.GIT_PREVIOUS_SUCCESSFUL_COMMIT && env.GIT_PREVIOUS_SUCCESSFUL_COMMIT != env.GIT_COMMIT) {
               echo "📊 Comparando con commit previo exitoso: ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT}"
               changedFiles = sh(
@@ -77,20 +74,18 @@ pipeline {
                 returnStdout: true
               ).trim().split('\n').findAll { it?.trim() }
             } else {
-              // Comparar con el commit anterior (HEAD~1)
               echo "📊 Comparando con commit anterior (HEAD~1)"
               def commitCount = sh(
                 script: "git rev-list --count HEAD",
                 returnStdout: true
               ).trim().toInteger()
-              
+
               if (commitCount > 1) {
                 changedFiles = sh(
                   script: "git diff --name-only HEAD~1 HEAD",
                   returnStdout: true
                 ).trim().split('\n').findAll { it?.trim() }
               } else {
-                // Si es el primer commit, todos los archivos son "nuevos"
                 changedFiles = sh(
                   script: "git ls-tree -r --name-only HEAD",
                   returnStdout: true
@@ -100,33 +95,21 @@ pipeline {
           } catch (Exception e) {
             echo "⚠️ No se pudo comparar con commit anterior: ${e.message}"
             echo "🔄 Usando todos los archivos del commit actual..."
-            // Si falla, asumir que hay cambios (mejor ejecutar que omitir)
             changedFiles = sh(
               script: "git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null || git ls-tree -r --name-only HEAD",
               returnStdout: true
             ).trim().split('\n').findAll { it?.trim() }
           }
-          
+
           echo "📋 Archivos modificados en este commit (${changedFiles.size()} archivos):"
-          changedFiles.take(10).each { file ->
-            echo "   - ${file}"
-          }
-          if (changedFiles.size() > 10) {
-            echo "   ... y ${changedFiles.size() - 10} archivos más"
-          }
-          
-          // Verificar si hay cambios en el directorio del servicio o en archivos compartidos
-          def hasServiceChanges = changedFiles.any { file -> 
-            file.startsWith(serviceDir)
-          }
-          
-          // También considerar cambios en archivos compartidos (pom.xml padre, etc.)
+          changedFiles.take(10).each { file -> echo "   - ${file}" }
+          if (changedFiles.size() > 10) { echo "   ... y ${changedFiles.size() - 10} archivos más" }
+
+          def hasServiceChanges = changedFiles.any { file -> file.startsWith(serviceDir) }
           def hasSharedChanges = changedFiles.any { file ->
-            file == 'pom.xml' || // POM padre afecta a todos
-            file.startsWith('jenkins/') || // Cambios en pipelines compartidos
-            file.startsWith('.github/') // Cambios en workflows de GitHub
+            file == 'pom.xml' || file.startsWith('jenkins/') || file.startsWith('.github/')
           }
-          
+
           if (!hasServiceChanges && !hasSharedChanges && changedFiles.size() > 0) {
             echo "ℹ️ No se detectaron cambios en ${env.SERVICE_NAME}"
             echo "📋 Archivos modificados pertenecen a otros servicios:"
@@ -135,7 +118,6 @@ pipeline {
             }
             echo "✅ Pipeline se omite porque no hay cambios relevantes en ${env.SERVICE_NAME}"
             currentBuild.result = 'SUCCESS'
-            // Usar catchError para marcar como éxito pero detener la ejecución
             catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
               error("Pipeline omitido exitosamente - no hay cambios en ${env.SERVICE_NAME}")
             }
@@ -151,9 +133,7 @@ pipeline {
           } else {
             echo "✅ Cambios detectados relevantes para ${env.SERVICE_NAME}:"
             if (hasServiceChanges) {
-              changedFiles.findAll { it.startsWith(serviceDir) }.each { file ->
-                echo "   ✓ ${file}"
-              }
+              changedFiles.findAll { it.startsWith(serviceDir) }.each { file -> echo "   ✓ ${file}" }
             }
             if (hasSharedChanges) {
               changedFiles.findAll { it == 'pom.xml' || it.startsWith('jenkins/') }.each { file ->
@@ -173,8 +153,8 @@ pipeline {
             def fetchIp = { vmName ->
               sh(script: """
 set -e
-curl -sS -H "Authorization: Bearer ${DO_TOKEN}" "https://api.digitalocean.com/v2/droplets?per_page=200" \
-  | jq -r --arg NAME \"${vmName}\" '.droplets[] | select(.name==\$NAME) | .networks.v4[] | select(.type==\"public\") | .ip_address' \
+curl -sS -H "Authorization: Bearer ${DO_TOKEN}" "https://api.digitalocean.com/v2/droplets?per_page=200" \\
+  | jq -r --arg NAME \\"${vmName}\\" '.droplets[] | select(.name==\\$NAME) | .networks.v4[] | select(.type==\\"public\\") | .ip_address' \\
   | head -n1
 """, returnStdout: true).trim()
             }
@@ -201,9 +181,7 @@ curl -sS -H "Authorization: Bearer ${DO_TOKEN}" "https://api.digitalocean.com/v2
               if (baseJob) {
                 jobCandidates << baseJob
                 if (!baseJob.contains('/')) {
-                  hints.each { suffix ->
-                    jobCandidates << "${baseJob}/${suffix}"
-                  }
+                  hints.each { suffix -> jobCandidates << "${baseJob}/${suffix}" }
                 }
               }
               jobCandidates = jobCandidates.collect { it.trim() }.findAll { it }.unique()
@@ -244,7 +222,6 @@ curl -sS -H "Authorization: Bearer ${DO_TOKEN}" "https://api.digitalocean.com/v2
 
             if (!minikubeIp) {
               echo "No se encontró la VM ${params.MINIKUBE_VM_NAME}. Solicitando creación..."
-              // Intentar crear la VM de Minikube usando el mismo mecanismo
               def candidate = params.JENKINS_CREATE_VM_JOB?.trim() ?: ''
               if (!candidate) { error 'Debe configurar JENKINS_CREATE_VM_JOB para crear VMs automáticamente' }
               try {
@@ -297,7 +274,7 @@ git ls-remote --heads "${params.REPO_URL}" "${branchToUse}" | grep -q "${branchT
               "REPO_URL=${params.REPO_URL}",
               "APP_BRANCH=${branchToUse}"
             ]) {
-            sh(label: 'Esperar VM lista', script: '''
+              sh(label: 'Esperar VM lista', script: '''
 set -e
 export SSHPASS="$VM_PASSWORD"
 for i in $(seq 1 30); do
@@ -311,10 +288,10 @@ echo "Timeout esperando SSH en $TARGET_IP"
 exit 1
 ''')
 
-            sh(label: 'Sincronizar repositorio', script: '''
+              sh(label: 'Sincronizar repositorio', script: '''
 set -e
 export SSHPASS="$VM_PASSWORD"
-sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
   jenkins@"$TARGET_IP" "REMOTE_BASE='$REMOTE_BASE' REMOTE_DIR='$REMOTE_DIR' REPO_URL='$REPO_URL' APP_BRANCH='$APP_BRANCH' VM_PASSWORD='$VM_PASSWORD' bash -s" <<'EOF'
 set -euo pipefail
 ensure_remote_base() {
@@ -331,8 +308,8 @@ ensure_remote_base() {
     fi
 
     if [ -n "${VM_PASSWORD:-}" ]; then
-      printf '%s\n' "$VM_PASSWORD" | sudo -S mkdir -p "$REMOTE_BASE"
-      printf '%s\n' "$VM_PASSWORD" | sudo -S chown -R "$USER":"$USER" "$REMOTE_BASE"
+      printf '%s\\n' "$VM_PASSWORD" | sudo -S mkdir -p "$REMOTE_BASE"
+      printf '%s\\n' "$VM_PASSWORD" | sudo -S chown -R "$USER":"$USER" "$REMOTE_BASE"
       return 0
     fi
   fi
@@ -360,7 +337,7 @@ chmod +x mvnw || true
 git config --global --add safe.directory "$REMOTE_DIR" || true
 EOF
 ''')
-          }
+            }
           }
         }
       }
@@ -377,7 +354,7 @@ EOF
             sh(label: 'Pruebas unitarias', script: '''
 set -e
 export SSHPASS="$VM_PASSWORD"
-sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
   jenkins@"$TARGET_IP" "REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOF'
 set -euo pipefail
 cd "$REMOTE_DIR"
@@ -423,7 +400,7 @@ PY
 
   if [ -n "$summary" ]; then
     echo "📊 ${module} -> ${summary}"
-  else
+  else:
     echo "⚠️ No se pudo extraer resumen para ${module}"
   fi
 }
@@ -449,7 +426,7 @@ EOF
             sh(label: 'Pruebas de integración', script: '''
 set -e
 export SSHPASS="$VM_PASSWORD"
-sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
   jenkins@"$TARGET_IP" "REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOF'
 set -euo pipefail
 cd "$REMOTE_DIR"
@@ -495,7 +472,7 @@ PY
 
   if [ -n "$summary" ]; then
     echo "📊 ${module} -> ${summary}"
-  else
+  else:
     echo "⚠️ No se pudo extraer resumen para ${module}"
   fi
 }
@@ -521,16 +498,16 @@ EOF
             sh(label: 'Empaquetar reportes', script: '''
 set -e
 export SSHPASS="$VM_PASSWORD"
-sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
   jenkins@"$TARGET_IP" "REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOF'
 set -euo pipefail
 cd "$REMOTE_DIR"
-tar -czf /tmp/test-reports-$SERVICE_NAME.tar.gz \
+tar -czf /tmp/test-reports-$SERVICE_NAME.tar.gz \\
   $SERVICE_NAME/target/surefire-reports 2>/dev/null || true
 EOF
 
 mkdir -p reports
-sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
   jenkins@"$TARGET_IP":/tmp/test-reports-$SERVICE_NAME.tar.gz reports/test-reports-$SERVICE_NAME.tar.gz || true
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenkins@"$TARGET_IP" "rm -f /tmp/test-reports-$SERVICE_NAME.tar.gz" || true
 ''')
@@ -542,9 +519,9 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenki
 
     stage('Build and Push Docker Image') {
       when {
-        expression { 
-          return params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean() || 
-                 params.DEPLOY_TO_K8S?.toString()?.toBoolean() 
+        expression {
+          return params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean() ||
+                 params.DEPLOY_TO_K8S?.toString()?.toBoolean()
         }
       }
       steps {
@@ -558,16 +535,13 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenki
             if (!imageTag) {
               imageTag = env.GIT_COMMIT ? env.GIT_COMMIT.take(7) : 'latest'
             }
-            
+
             def imageRegistry = params.K8S_IMAGE_REGISTRY?.trim()
-            if (!imageRegistry) {
-              error "El parámetro K8S_IMAGE_REGISTRY no puede ser vacío."
-            }
+            if (!imageRegistry) { error "El parámetro K8S_IMAGE_REGISTRY no puede ser vacío." }
 
             if (params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean()) {
-              // Para Minikube: construir imagen local en VM y cargar a Minikube
               echo "🔨 Construyendo imagen Docker para Minikube: ${env.SERVICE_NAME}"
-              
+
               withEnv([
                 "BUILD_IP=${env.BUILD_VM_IP}",
                 "MINIKUBE_IP=${env.MINIKUBE_VM_IP}",
@@ -579,7 +553,7 @@ set -e
 export SSHPASS="$VM_PASSWORD"
 
 # --- CONSTRUCCIÓN Y EMPAQUETADO EN VM BUILD ---
-sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
   jenkins@"$BUILD_IP" "REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOFBUILD'
 set -euo pipefail
 cd "$REMOTE_DIR"
@@ -596,27 +570,27 @@ fi
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "🔨 Construyendo: $SERVICE_NAME para Minikube"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-docker build -t "${SERVICE_NAME}:minikube" "$REMOTE_DIR" \
-  -f "$DOCKERFILE_PATH" \
-  --build-arg SERVICE_NAME="$SERVICE_NAME" \
-  --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+docker build -t "${SERVICE_NAME}:minikube" "$REMOTE_DIR" \\
+  -f "$DOCKERFILE_PATH" \\
+  --build-arg SERVICE_NAME="$SERVICE_NAME" \\
+  --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \\
   || { echo "❌ Error construyendo $SERVICE_NAME"; exit 1; }
 echo "📦 Empaquetando imagen..."
 docker save "${SERVICE_NAME}:minikube" | gzip > "/tmp/${SERVICE_NAME}-minikube.tar.gz"
 EOFBUILD
 
 # --- TRANSFIERE: DE VM BUILD A JENKINS ---
-sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  jenkins@"$BUILD_IP":"/tmp/${SERVICE_NAME}-minikube.tar.gz" \
+sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
+  jenkins@"$BUILD_IP":"/tmp/${SERVICE_NAME}-minikube.tar.gz" \\
   ./
 
 # --- TRANSFIERE: DE JENKINS A VM MINIKUBE ---
-sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  "./${SERVICE_NAME}-minikube.tar.gz" \
+sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
+  "./${SERVICE_NAME}-minikube.tar.gz" \\
   jenkins@"$MINIKUBE_IP":"/tmp/${SERVICE_NAME}-minikube.tar.gz"
 
 # --- CARGA IMAGEN EN MINIKUBE ---
-sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
   jenkins@"$MINIKUBE_IP" "SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOFLOAD'
 set -euo pipefail
 export PATH="/usr/local/bin:$PATH"
@@ -628,9 +602,8 @@ EOFLOAD
 '''
               }
             }
-            
+
             if (params.DEPLOY_TO_K8S?.toString()?.toBoolean()) {
-              // Para GKE: construir y subir a GCR (código original)
               echo "🔨 Construyendo imagen Docker para GKE: ${env.SERVICE_NAME}"
               echo "📦 Registro: ${imageRegistry}"
               echo "🏷️  Tag: ${imageTag}"
@@ -649,11 +622,11 @@ export SSHPASS="$VM_PASSWORD"
 
 echo "🔐 Copiando credenciales de GCP a la VM..."
 CREDS_TEMP_FILE="/tmp/gcp-creds-$RANDOM.json"
-sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
   "${GOOGLE_APPLICATION_CREDENTIALS}" jenkins@"$TARGET_IP":"$CREDS_TEMP_FILE"
 
 echo "🔨 Construyendo y subiendo imagen Docker a GCR..."
-sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
   jenkins@"$TARGET_IP" "GCP_PROJECT_ID='$GCP_PROJECT_ID' IMAGE_REGISTRY='$IMAGE_REGISTRY' IMAGE_TAG='$IMAGE_TAG' REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' CREDS_TEMP_FILE='$CREDS_TEMP_FILE' bash -s" <<'EOFBUILD'
 set -euo pipefail
 
@@ -684,10 +657,10 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "🔨 Construyendo: $SERVICE_NAME"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-docker build -t "${IMAGE_REGISTRY}/${SERVICE_NAME}:${IMAGE_TAG}" "$REMOTE_DIR" \
-  -f "$DOCKERFILE_PATH" \
-  --build-arg SERVICE_NAME="$SERVICE_NAME" \
-  --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+docker build -t "${IMAGE_REGISTRY}/${SERVICE_NAME}:${IMAGE_TAG}" "$REMOTE_DIR" \\
+  -f "$DOCKERFILE_PATH" \\
+  --build-arg SERVICE_NAME="$SERVICE_NAME" \\
+  --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \\
   || {
     echo "❌ Error construyendo $SERVICE_NAME"
     exit 1
@@ -717,11 +690,8 @@ EOFBUILD
         expression { return params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean() }
       }
       steps {
-        withCredentials([
-          string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')
-        ]) {
+        withCredentials([string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')]) {
           script {
-            // Mapeo de servicios a puertos
             def servicePorts = [
               'user-service': '8085',
               'product-service': '8083',
@@ -731,11 +701,10 @@ EOFBUILD
               'favourite-service': '8086',
               'service-discovery': '8761'
             ]
-            
             def servicePort = servicePorts[env.SERVICE_NAME] ?: '8080'
-            
+
             echo "🚀 Desplegando ${env.SERVICE_NAME} a Minikube en VM ${env.DROPLET_IP}..."
-            
+
             withEnv([
               "TARGET_IP=${env.MINIKUBE_VM_IP}",
               "SERVICE_NAME=${env.SERVICE_NAME}",
@@ -748,16 +717,12 @@ set -e
 export SSHPASS="$VM_PASSWORD"
 
 echo "🚀 Desplegando $SERVICE_NAME a Minikube..."
-sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
   jenkins@"$TARGET_IP" "SERVICE_NAME='$SERVICE_NAME' SERVICE_PORT='$SERVICE_PORT' NAMESPACE='$NAMESPACE' REMOTE_DIR='$REMOTE_DIR' bash -s" <<'EOFDEPLOY'
 set -euo pipefail
 
 export PATH="/usr/local/bin:$PATH"
 
-# Asegurar PATH en VM Minikube
-export PATH="/usr/local/bin:$PATH"
-
-# Configurar contexto de Minikube (solo si no está ya activo)
 CURRENT_CONTEXT=$(kubectl config current-context 2>/dev/null || echo "")
 if [ "$CURRENT_CONTEXT" != "minikube" ]; then
   echo "🔄 Cambiando contexto a minikube..."
@@ -766,10 +731,8 @@ else
   echo "✅ Contexto minikube ya está activo"
 fi
 
-# Crear namespace si no existe
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
-# Verificar que ConfigMap y Secrets existen
 if ! kubectl get configmap ecommerce-config -n "$NAMESPACE" >/dev/null 2>&1; then
   echo "⚠️ ConfigMap ecommerce-config no existe. Aplicando desde repositorio..."
   if [ -f "$REMOTE_DIR/minikube-deployment/minikube-configmap.yaml" ]; then
@@ -790,7 +753,6 @@ fi
 
 echo "📦 Desplegando $SERVICE_NAME en Minikube..."
 
-# Aplicar deployment
 kubectl apply -f - <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -852,7 +814,6 @@ kubectl wait --for=condition=available --timeout=300s deployment/$SERVICE_NAME -
 
 echo "✅ $SERVICE_NAME desplegado exitosamente"
 
-# Verificar estado
 echo "📊 Estado del deployment:"
 kubectl get deployment $SERVICE_NAME -n "$NAMESPACE"
 kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME"
@@ -881,20 +842,14 @@ EOFDEPLOY
             }
 
             def imageRegistry = params.K8S_IMAGE_REGISTRY?.trim()
-            if (!imageRegistry) {
-              error "El parámetro K8S_IMAGE_REGISTRY no puede ser vacío."
-            }
+            if (!imageRegistry) { error "El parámetro K8S_IMAGE_REGISTRY no puede ser vacío." }
 
             def clusterName = params.GKE_CLUSTER_NAME?.trim()
             def clusterLocation = params.GKE_LOCATION?.trim()
-            if (!clusterName || !clusterLocation) {
-              error "Debe especificar GKE_CLUSTER_NAME y GKE_LOCATION."
-            }
+            if (!clusterName || !clusterLocation) { error "Debe especificar GKE_CLUSTER_NAME y GKE_LOCATION." }
 
             def infraRepoUrl = params.INFRA_REPO_URL?.trim()
-            if (!infraRepoUrl) {
-              error "El parámetro INFRA_REPO_URL es requerido para clonar los manifiestos."
-            }
+            if (!infraRepoUrl) { error "El parámetro INFRA_REPO_URL es requerido para clonar los manifiestos." }
             def infraRepoBranch = params.INFRA_REPO_BRANCH?.trim() ?: 'infra/master'
 
             def workspaceRoot = pwd()
@@ -934,14 +889,13 @@ jenkins/scripts/deploy-single-service-to-gke.sh
         }
       }
     }
+
     stage('Wait for Service Discovery') {
       when {
         expression { env.SERVICE_NAME != 'service-discovery' && (params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean()) }
       }
       steps {
-        withCredentials([
-          string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')
-        ]) {
+        withCredentials([string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')]) {
           script {
             withEnv([
               "TARGET_IP=${env.MINIKUBE_VM_IP}",
@@ -953,12 +907,10 @@ export SSHPASS="$VM_PASSWORD"
 
 echo "⏳ Esperando que Service Discovery esté UP..."
 for i in $(seq 1 30); do
-  # ¿Existe pod corriendo?
-  if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
     jenkins@"$TARGET_IP" "kubectl get pods -n $NAMESPACE -l app=service-discovery --field-selector=status.phase=Running" | grep -q service-discovery; then
 
-    # Health check dentro del deployment
-    if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
       jenkins@"$TARGET_IP" "kubectl exec -n $NAMESPACE deployment/service-discovery -- curl -s --max-time 5 http://localhost:8761/actuator/health" | grep -q '"status"[[:space:]]*:[[:space:]]*"UP"'; then
       echo "✅ Service Discovery saludable"
       exit 0
@@ -976,6 +928,8 @@ exit 1
         }
       }
     }
+
+  } // <-- ESTA LLAVE CIERRA EL BLOQUE stages (era la que faltaba)
 
   post {
     success {
