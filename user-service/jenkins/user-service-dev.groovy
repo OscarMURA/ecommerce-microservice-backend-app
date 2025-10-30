@@ -151,12 +151,16 @@ pipeline {
         withCredentials([string(credentialsId: 'digitalocean-token', variable: 'DO_TOKEN')]) {
           script {
             def fetchIp = { vmName ->
-              sh(script: '''
+              def result = ''
+              withEnv(["VMNAME=${vmName}"]) {
+                result = sh(script: '''
 set -e
 curl -sS -H "Authorization: Bearer ${DO_TOKEN}" "https://api.digitalocean.com/v2/droplets?per_page=200" \
   | jq -r --arg NAME "$VMNAME" '.droplets[] | select(.name==$NAME) | .networks.v4[] | select(.type=="public") | .ip_address' \
   | head -n1
-''', returnStdout: true, environment: [ VMNAME: vmName ]).trim()
+''', returnStdout: true).trim()
+              }
+              return result
             }
 
             def buildIp = fetchIp(params.VM_NAME)
