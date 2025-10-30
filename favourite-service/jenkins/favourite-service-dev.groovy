@@ -745,8 +745,14 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   jenkins@"$TARGET_IP" "SERVICE_NAME='$SERVICE_NAME' SERVICE_PORT='$SERVICE_PORT' NAMESPACE='$NAMESPACE' REMOTE_DIR='$REMOTE_DIR' bash -s" <<'EOFDEPLOY'
 set -euo pipefail
 
-# Configurar contexto de Minikube
-kubectl config use-context minikube
+# Configurar contexto de Minikube (solo si no está ya activo)
+CURRENT_CONTEXT=$(kubectl config current-context 2>/dev/null || echo "")
+if [ "$CURRENT_CONTEXT" != "minikube" ]; then
+  echo "🔄 Cambiando contexto a minikube..."
+  kubectl config use-context minikube
+else
+  echo "✅ Contexto minikube ya está activo"
+fi
 
 # Crear namespace si no existe
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -

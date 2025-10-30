@@ -758,8 +758,14 @@ export PATH="/usr/local/bin:$PATH"
 # Asegurar PATH en VM Minikube
 export PATH="/usr/local/bin:$PATH"
 
-# Configurar contexto de Minikube
-kubectl config use-context minikube
+# Configurar contexto de Minikube (solo si no está ya activo)
+CURRENT_CONTEXT=$(kubectl config current-context 2>/dev/null || echo "")
+if [ "$CURRENT_CONTEXT" != "minikube" ]; then
+  echo "🔄 Cambiando contexto a minikube..."
+  kubectl config use-context minikube
+else
+  echo "✅ Contexto minikube ya está activo"
+fi
 
 # Crear namespace si no existe
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
