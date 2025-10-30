@@ -12,8 +12,9 @@ pipeline {
     string(name: 'VM_JOB_EXTRA_PATHS', defaultValue: '', description: 'Rutas completas adicionales (coma separada) a intentar antes de los sufijos')
     string(name: 'REPO_URL', defaultValue: 'https://github.com/OscarMURA/ecommerce-microservice-backend-app.git', description: 'Repositorio a clonar en la VM')
     string(name: 'APP_BRANCH', defaultValue: '', description: 'Branch del repo a usar (vacío = rama actual del pipeline)')
-    booleanParam(name: 'DEPLOY_TO_K8S', defaultValue: false, description: 'Desplegar servicios en Kubernetes al finalizar las pruebas')
-    choice(name: 'K8S_ENVIRONMENT', choices: ['dev', 'staging', 'prod'], description: 'Etiqueta de ambiente para los recursos de Kubernetes')
+    booleanParam(name: 'DEPLOY_TO_MINIKUBE', defaultValue: true, description: 'Desplegar servicio en Minikube (VM de desarrollo) al finalizar las pruebas')
+    booleanParam(name: 'DEPLOY_TO_K8S', defaultValue: false, description: 'Desplegar servicios en GKE (Kubernetes en GCP) al finalizar las pruebas')
+    choice(name: 'K8S_ENVIRONMENT', choices: ['dev', 'staging', 'prod'], description: 'Etiqueta de ambiente para los recursos de Kubernetes (solo para GKE)')
     string(name: 'K8S_NAMESPACE', defaultValue: 'ecommerce', description: 'Namespace de Kubernetes donde se desplegarán los servicios')
     string(name: 'GKE_CLUSTER_NAME', defaultValue: 'ecommerce-dev-gke-v2', description: 'Nombre del cluster GKE')
     string(name: 'GKE_LOCATION', defaultValue: 'us-central1-a', description: 'Zona o región del cluster GKE')
@@ -516,7 +517,10 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenki
 
     stage('Build and Push Docker Image') {
       when {
-        expression { return params.DEPLOY_TO_K8S?.toString()?.toBoolean() }
+        expression { 
+          return params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean() || 
+                 params.DEPLOY_TO_K8S?.toString()?.toBoolean() 
+        }
       }
       steps {
         withCredentials([
@@ -535,19 +539,80 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenki
               error "El parámetro K8S_IMAGE_REGISTRY no puede ser vacío."
             }
 
-            echo "🔨 Construyendo imagen Docker para: ${env.SERVICE_NAME}"
-            echo "📦 Registro: ${imageRegistry}"
-            echo "🏷️  Tag: ${imageTag}"
+            if (params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean()) {
+              // Para Minikube: construir imagen local en VM y cargar a Minikube
+              echo "🔨 Construyendo imagen Docker para Minikube: ${env.SERVICE_NAME}"
+              
+              withEnv([
+                "TARGET_IP=${env.DROPLET_IP}",
+                "REMOTE_DIR=${env.REMOTE_DIR}",
+                "SERVICE_NAME=${env.SERVICE_NAME}"
+              ]) {
+                sh '''
+set -e
+export SSHPASS="$VM_PASSWORD"
 
-            withEnv([
-              "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
-              "IMAGE_REGISTRY=${imageRegistry}",
-              "IMAGE_TAG=${imageTag}",
-              "TARGET_IP=${env.DROPLET_IP}",
-              "REMOTE_DIR=${env.REMOTE_DIR}",
-              "SERVICE_NAME=${env.SERVICE_NAME}"
-            ]) {
-              sh '''
+echo "🔨 Construyendo imagen Docker en la VM para Minikube..."
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$TARGET_IP" "REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOFBUILD'
+set -euo pipefail
+
+cd "$REMOTE_DIR"
+
+SERVICE_DIR="$REMOTE_DIR/$SERVICE_NAME"
+DOCKERFILE_PATH="$SERVICE_DIR/Dockerfile"
+
+if [ ! -d "$SERVICE_DIR" ]; then
+  echo "❌ Error: Directorio $SERVICE_DIR no existe"
+  exit 1
+fi
+
+if [ ! -f "$DOCKERFILE_PATH" ]; then
+  echo "❌ Error: Dockerfile no encontrado en $DOCKERFILE_PATH"
+  exit 1
+fi
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🔨 Construyendo: $SERVICE_NAME para Minikube"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Construir imagen con tag minikube
+docker build -t "${SERVICE_NAME}:minikube" "$REMOTE_DIR" \
+  -f "$DOCKERFILE_PATH" \
+  --build-arg SERVICE_NAME="$SERVICE_NAME" \
+  --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+  || {
+    echo "❌ Error construyendo $SERVICE_NAME"
+    exit 1
+  }
+
+echo "📦 Cargando imagen a Minikube..."
+minikube image load "${SERVICE_NAME}:minikube" || {
+  echo "❌ Error cargando imagen a Minikube"
+  exit 1
+}
+
+echo "✅ Imagen construida y cargada exitosamente a Minikube"
+EOFBUILD
+'''
+              }
+            }
+            
+            if (params.DEPLOY_TO_K8S?.toString()?.toBoolean()) {
+              // Para GKE: construir y subir a GCR (código original)
+              echo "🔨 Construyendo imagen Docker para GKE: ${env.SERVICE_NAME}"
+              echo "📦 Registro: ${imageRegistry}"
+              echo "🏷️  Tag: ${imageTag}"
+
+              withEnv([
+                "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
+                "IMAGE_REGISTRY=${imageRegistry}",
+                "IMAGE_TAG=${imageTag}",
+                "TARGET_IP=${env.DROPLET_IP}",
+                "REMOTE_DIR=${env.REMOTE_DIR}",
+                "SERVICE_NAME=${env.SERVICE_NAME}"
+              ]) {
+                sh '''
 set -e
 export SSHPASS="$VM_PASSWORD"
 
@@ -556,12 +621,11 @@ CREDS_TEMP_FILE="/tmp/gcp-creds-$RANDOM.json"
 sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   "${GOOGLE_APPLICATION_CREDENTIALS}" jenkins@"$TARGET_IP":"$CREDS_TEMP_FILE"
 
-echo "🔨 Construyendo y subiendo imagen Docker..."
+echo "🔨 Construyendo y subiendo imagen Docker a GCR..."
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   jenkins@"$TARGET_IP" "GCP_PROJECT_ID='$GCP_PROJECT_ID' IMAGE_REGISTRY='$IMAGE_REGISTRY' IMAGE_TAG='$IMAGE_TAG' REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' CREDS_TEMP_FILE='$CREDS_TEMP_FILE' bash -s" <<'EOFBUILD'
 set -euo pipefail
 
-# Usar la ruta temporal que pasamos
 GCP_CREDS_FILE="$CREDS_TEMP_FILE"
 
 echo "🔐 Autenticando con Google Cloud..."
@@ -574,13 +638,11 @@ cd "$REMOTE_DIR"
 SERVICE_DIR="$REMOTE_DIR/$SERVICE_NAME"
 DOCKERFILE_PATH="$SERVICE_DIR/Dockerfile"
 
-# Verificar si existe el directorio del servicio
 if [ ! -d "$SERVICE_DIR" ]; then
   echo "❌ Error: Directorio $SERVICE_DIR no existe"
   exit 1
 fi
 
-# Verificar si existe Dockerfile en el directorio del servicio
 if [ ! -f "$DOCKERFILE_PATH" ]; then
   echo "❌ Error: Dockerfile no encontrado en $DOCKERFILE_PATH"
   exit 1
@@ -591,7 +653,6 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "🔨 Construyendo: $SERVICE_NAME"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Construir desde la raíz del repositorio, usando -f para especificar el Dockerfile
 docker build -t "${IMAGE_REGISTRY}/${SERVICE_NAME}:${IMAGE_TAG}" "$REMOTE_DIR" \
   -f "$DOCKERFILE_PATH" \
   --build-arg SERVICE_NAME="$SERVICE_NAME" \
@@ -607,13 +668,154 @@ docker push "${IMAGE_REGISTRY}/${SERVICE_NAME}:${IMAGE_TAG}" || {
   exit 1
 }
 
-echo "✅ Completado: $SERVICE_NAME"
-
 echo "🧹 Limpiando credenciales temporales..."
 rm -f "$GCP_CREDS_FILE"
 
-echo "✅ Imagen construida y subida exitosamente"
+echo "✅ Imagen construida y subida exitosamente a GCR"
 EOFBUILD
+'''
+              }
+            }
+            }
+          }
+        }
+      }
+    }
+
+    stage('Deploy to Minikube') {
+      when {
+        expression { return params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean() }
+      }
+      steps {
+        withCredentials([
+          string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')
+        ]) {
+          script {
+            // Mapeo de servicios a puertos
+            def servicePorts = [
+              'user-service': '8085',
+              'product-service': '8083',
+              'order-service': '8081',
+              'payment-service': '8082',
+              'shipping-service': '8084',
+              'favourite-service': '8086',
+              'service-discovery': '8761'
+            ]
+            
+            def servicePort = servicePorts[env.SERVICE_NAME] ?: '8080'
+            
+            echo "🚀 Desplegando ${env.SERVICE_NAME} a Minikube en VM ${env.DROPLET_IP}..."
+            
+            withEnv([
+              "TARGET_IP=${env.DROPLET_IP}",
+              "SERVICE_NAME=${env.SERVICE_NAME}",
+              "SERVICE_PORT=${servicePort}",
+              "NAMESPACE=ecommerce",
+              "REMOTE_DIR=${env.REMOTE_DIR}"
+            ]) {
+              sh '''
+set -e
+export SSHPASS="$VM_PASSWORD"
+
+echo "🚀 Desplegando $SERVICE_NAME a Minikube..."
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$TARGET_IP" "SERVICE_NAME='$SERVICE_NAME' SERVICE_PORT='$SERVICE_PORT' NAMESPACE='$NAMESPACE' REMOTE_DIR='$REMOTE_DIR' bash -s" <<'EOFDEPLOY'
+set -euo pipefail
+
+# Configurar contexto de Minikube
+kubectl config use-context minikube
+
+# Crear namespace si no existe
+kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+
+# Verificar que ConfigMap y Secrets existen
+if ! kubectl get configmap ecommerce-config -n "$NAMESPACE" >/dev/null 2>&1; then
+  echo "⚠️ ConfigMap ecommerce-config no existe. Aplicando desde repositorio..."
+  if [ -f "$REMOTE_DIR/minikube-deployment/minikube-configmap.yaml" ]; then
+    kubectl apply -f "$REMOTE_DIR/minikube-deployment/minikube-configmap.yaml"
+  else
+    echo "❌ No se encontró minikube-configmap.yaml. Asegúrate de que el repositorio esté sincronizado."
+  fi
+fi
+
+if ! kubectl get secret ecommerce-secrets -n "$NAMESPACE" >/dev/null 2>&1; then
+  echo "⚠️ Secret ecommerce-secrets no existe. Aplicando desde repositorio..."
+  if [ -f "$REMOTE_DIR/minikube-deployment/minikube-secrets.yaml" ]; then
+    kubectl apply -f "$REMOTE_DIR/minikube-deployment/minikube-secrets.yaml"
+  else
+    echo "❌ No se encontró minikube-secrets.yaml. Asegúrate de que el repositorio esté sincronizado."
+  fi
+fi
+
+echo "📦 Desplegando $SERVICE_NAME en Minikube..."
+
+# Aplicar deployment
+kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: $SERVICE_NAME
+  namespace: $NAMESPACE
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: $SERVICE_NAME
+  template:
+    metadata:
+      labels:
+        app: $SERVICE_NAME
+    spec:
+      containers:
+      - name: $SERVICE_NAME
+        image: $SERVICE_NAME:minikube
+        ports:
+        - containerPort: $SERVICE_PORT
+        env:
+        - name: SERVER_PORT
+          value: "$SERVICE_PORT"
+        - name: SPRING_CLOUD_CONFIG_ENABLED
+          value: "false"
+        envFrom:
+        - configMapRef:
+            name: ecommerce-config
+        - secretRef:
+            name: ecommerce-secrets
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 400m
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: $SERVICE_NAME
+  namespace: $NAMESPACE
+spec:
+  selector:
+    app: $SERVICE_NAME
+  ports:
+  - port: $SERVICE_PORT
+    targetPort: $SERVICE_PORT
+EOF
+
+echo "⏳ Esperando que $SERVICE_NAME esté listo..."
+kubectl wait --for=condition=available --timeout=300s deployment/$SERVICE_NAME -n "$NAMESPACE" || {
+  echo "⚠️ Timeout esperando deployment. Verificando estado..."
+  kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME"
+  exit 1
+}
+
+echo "✅ $SERVICE_NAME desplegado exitosamente"
+
+# Verificar estado
+echo "📊 Estado del deployment:"
+kubectl get deployment $SERVICE_NAME -n "$NAMESPACE"
+kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME"
+EOFDEPLOY
 '''
             }
           }
@@ -621,7 +823,7 @@ EOFBUILD
       }
     }
 
-    stage('Deploy to Kubernetes') {
+    stage('Deploy to Kubernetes (GKE)') {
       when {
         expression { return params.DEPLOY_TO_K8S?.toString()?.toBoolean() }
       }
@@ -692,6 +894,49 @@ jenkins/scripts/deploy-single-service-to-gke.sh
       }
     }
   }
+
+    stage('Wait for Service Discovery') {
+      when {
+        expression { env.SERVICE_NAME != 'service-discovery' && (params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean()) }
+      }
+      steps {
+        withCredentials([
+          string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')
+        ]) {
+          script {
+            withEnv([
+              "TARGET_IP=${env.DROPLET_IP}",
+              "NAMESPACE=ecommerce"
+            ]) {
+              sh '''
+set -e
+export SSHPASS="$VM_PASSWORD"
+
+echo "⏳ Esperando que Service Discovery esté UP..."
+for i in $(seq 1 30); do
+  # ¿Existe pod corriendo?
+  if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    jenkins@"$TARGET_IP" "kubectl get pods -n $NAMESPACE -l app=service-discovery --field-selector=status.phase=Running" | grep -q service-discovery; then
+
+    # Health check dentro del deployment
+    if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      jenkins@"$TARGET_IP" "kubectl exec -n $NAMESPACE deployment/service-discovery -- curl -s --max-time 5 http://localhost:8761/actuator/health" | grep -q '"status"\s*:\s*"UP"'; then
+      echo "✅ Service Discovery saludable"
+      exit 0
+    fi
+  fi
+  echo "⌛ Intento $i/30: esperando Service Discovery..."
+  sleep 10
+done
+
+echo "❌ Service Discovery no disponible tras 5 minutos"
+exit 1
+'''
+            }
+          }
+        }
+      }
+    }
 
   post {
     success {

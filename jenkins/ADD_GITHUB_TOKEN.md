@@ -81,3 +81,5 @@ Para que los checks de Jenkins aparezcan en GitHub, necesitas agregar el token d
 El ID de la credencial **DEBE** ser exactamente `github-token` (sin mayúsculas, sin espacios).
 
 Si cambias el ID, debes actualizar también todos los pipelines de Jenkins.
+
+
