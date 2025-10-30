@@ -617,7 +617,7 @@ sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 
 # --- CARGA IMAGEN EN MINIKUBE ---
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  jenkins@"$MINIKUBE_IP" "bash -s" <<'EOFLOAD'
+  jenkins@"$MINIKUBE_IP" "SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOFLOAD'
 set -euo pipefail
 export PATH="/usr/local/bin:$PATH"
 docker load -i "/tmp/${SERVICE_NAME}-minikube.tar.gz"
