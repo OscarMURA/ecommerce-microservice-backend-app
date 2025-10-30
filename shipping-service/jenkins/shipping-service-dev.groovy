@@ -53,9 +53,7 @@ pipeline {
     stage('Checkout Pipeline Repo') {
       steps {
         checkout scm
-        script {
-          echo "Workspace: ${env.WORKSPACE}"
-        }
+        script { echo "Workspace: ${env.WORKSPACE}" }
       }
     }
 
@@ -64,12 +62,10 @@ pipeline {
         script {
           def serviceDir = "${env.SERVICE_NAME}/"
           def changedFiles = []
-          
+
           echo "🔍 Verificando cambios en ${env.SERVICE_NAME}..."
-          
-          // Obtener la lista de archivos cambiados comparando con el commit anterior
+
           try {
-            // Para multibranch pipelines, usar GIT_PREVIOUS_SUCCESSFUL_COMMIT si está disponible
             if (env.GIT_PREVIOUS_SUCCESSFUL_COMMIT && env.GIT_PREVIOUS_SUCCESSFUL_COMMIT != env.GIT_COMMIT) {
               echo "📊 Comparando con commit previo exitoso: ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT}"
               changedFiles = sh(
@@ -77,56 +73,32 @@ pipeline {
                 returnStdout: true
               ).trim().split('\n').findAll { it?.trim() }
             } else {
-              // Comparar con el commit anterior (HEAD~1)
               echo "📊 Comparando con commit anterior (HEAD~1)"
-              def commitCount = sh(
-                script: "git rev-list --count HEAD",
-                returnStdout: true
-              ).trim().toInteger()
-              
+              def commitCount = sh(script: "git rev-list --count HEAD", returnStdout: true).trim().toInteger()
               if (commitCount > 1) {
-                changedFiles = sh(
-                  script: "git diff --name-only HEAD~1 HEAD",
-                  returnStdout: true
-                ).trim().split('\n').findAll { it?.trim() }
+                changedFiles = sh(script: "git diff --name-only HEAD~1 HEAD", returnStdout: true).trim().split('\n').findAll { it?.trim() }
               } else {
-                // Si es el primer commit, todos los archivos son "nuevos"
-                changedFiles = sh(
-                  script: "git ls-tree -r --name-only HEAD",
-                  returnStdout: true
-                ).trim().split('\n').findAll { it?.trim() }
+                changedFiles = sh(script: "git ls-tree -r --name-only HEAD", returnStdout: true).trim().split('\n').findAll { it?.trim() }
               }
             }
           } catch (Exception e) {
             echo "⚠️ No se pudo comparar con commit anterior: ${e.message}"
             echo "🔄 Usando todos los archivos del commit actual..."
-            // Si falla, asumir que hay cambios (mejor ejecutar que omitir)
             changedFiles = sh(
               script: "git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null || git ls-tree -r --name-only HEAD",
               returnStdout: true
             ).trim().split('\n').findAll { it?.trim() }
           }
-          
+
           echo "📋 Archivos modificados en este commit (${changedFiles.size()} archivos):"
-          changedFiles.take(10).each { file ->
-            echo "   - ${file}"
-          }
-          if (changedFiles.size() > 10) {
-            echo "   ... y ${changedFiles.size() - 10} archivos más"
-          }
-          
-          // Verificar si hay cambios en el directorio del servicio o en archivos compartidos
-          def hasServiceChanges = changedFiles.any { file -> 
-            file.startsWith(serviceDir)
-          }
-          
-          // También considerar cambios en archivos compartidos (pom.xml padre, etc.)
+          changedFiles.take(10).each { file -> echo "   - ${file}" }
+          if (changedFiles.size() > 10) { echo "   ... y ${changedFiles.size() - 10} archivos más" }
+
+          def hasServiceChanges = changedFiles.any { file -> file.startsWith(serviceDir) }
           def hasSharedChanges = changedFiles.any { file ->
-            file == 'pom.xml' || // POM padre afecta a todos
-            file.startsWith('jenkins/') || // Cambios en pipelines compartidos
-            file.startsWith('.github/') // Cambios en workflows de GitHub
+            file == 'pom.xml' || file.startsWith('jenkins/') || file.startsWith('.github/')
           }
-          
+
           if (!hasServiceChanges && !hasSharedChanges && changedFiles.size() > 0) {
             echo "ℹ️ No se detectaron cambios en ${env.SERVICE_NAME}"
             echo "📋 Archivos modificados pertenecen a otros servicios:"
@@ -135,31 +107,18 @@ pipeline {
             }
             echo "✅ Pipeline se omite porque no hay cambios relevantes en ${env.SERVICE_NAME}"
             currentBuild.result = 'SUCCESS'
-            // Usar catchError para marcar como éxito pero detener la ejecución
-            catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
-              error("Pipeline omitido exitosamente - no hay cambios en ${env.SERVICE_NAME}")
-            }
+            catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') { error("Pipeline omitido exitosamente - no hay cambios en ${env.SERVICE_NAME}") }
             return
           } else if (changedFiles.size() == 0) {
             echo "ℹ️ No se detectaron cambios en el repositorio"
             echo "✅ Pipeline se omite porque no hay cambios"
             currentBuild.result = 'SUCCESS'
-            catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
-              error("Pipeline omitido exitosamente - no hay cambios en el repositorio")
-            }
+            catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') { error("Pipeline omitido exitosamente - no hay cambios en el repositorio") }
             return
           } else {
             echo "✅ Cambios detectados relevantes para ${env.SERVICE_NAME}:"
-            if (hasServiceChanges) {
-              changedFiles.findAll { it.startsWith(serviceDir) }.each { file ->
-                echo "   ✓ ${file}"
-              }
-            }
-            if (hasSharedChanges) {
-              changedFiles.findAll { it == 'pom.xml' || it.startsWith('jenkins/') }.each { file ->
-                echo "   ✓ ${file} (archivo compartido)"
-              }
-            }
+            if (hasServiceChanges) { changedFiles.findAll { it.startsWith(serviceDir) }.each { file -> echo "   ✓ ${file}" } }
+            if (hasSharedChanges) { changedFiles.findAll { it == 'pom.xml' || it.startsWith('jenkins/') }.each { file -> echo "   ✓ ${file} (archivo compartido)" } }
             echo "🚀 Continuando con el pipeline..."
           }
         }
@@ -184,26 +143,14 @@ curl -sS -H "Authorization: Bearer ${DO_TOKEN}" "https://api.digitalocean.com/v2
             if (!currentIp) {
               echo "No se encontró la VM ${params.VM_NAME}. Solicitando creación..."
               def baseJob = params.JENKINS_CREATE_VM_JOB?.trim() ?: ''
-              def hints = (params.VM_JOB_BRANCH_HINTS ?: '')
-                .split(',')
-                .collect { it.trim() }
-                .findAll { it }
-              if (env.PIPELINE_BRANCH && !hints.contains(env.PIPELINE_BRANCH)) {
-                hints << env.PIPELINE_BRANCH
-              }
-              def extra = (params.VM_JOB_EXTRA_PATHS ?: '')
-                .split(',')
-                .collect { it.trim() }
-                .findAll { it }
+              def hints = (params.VM_JOB_BRANCH_HINTS ?: '').split(',').collect { it.trim() }.findAll { it }
+              if (env.PIPELINE_BRANCH && !hints.contains(env.PIPELINE_BRANCH)) { hints << env.PIPELINE_BRANCH }
+              def extra = (params.VM_JOB_EXTRA_PATHS ?: '').split(',').collect { it.trim() }.findAll { it }
               def jobCandidates = []
               jobCandidates.addAll(extra)
               if (baseJob) {
                 jobCandidates << baseJob
-                if (!baseJob.contains('/')) {
-                  hints.each { suffix ->
-                    jobCandidates << "${baseJob}/${suffix}"
-                  }
-                }
+                if (!baseJob.contains('/')) { hints.each { suffix -> jobCandidates << "${baseJob}/${suffix}" } }
               }
               jobCandidates = jobCandidates.collect { it.trim() }.findAll { it }.unique()
 
@@ -266,9 +213,7 @@ curl -sS -H "Authorization: Bearer ${DO_TOKEN}" "https://api.digitalocean.com/v2
         withCredentials([string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')]) {
           script {
             def branchToUse = params.APP_BRANCH?.trim()
-            if (!branchToUse) {
-              branchToUse = env.PIPELINE_BRANCH ?: 'develop'
-            }
+            if (!branchToUse) { branchToUse = env.PIPELINE_BRANCH ?: 'develop' }
             def branchExistsStatus = sh(
               script: """
 set -e
@@ -288,7 +233,7 @@ git ls-remote --heads "${params.REPO_URL}" "${branchToUse}" | grep -q "${branchT
               "REPO_URL=${params.REPO_URL}",
               "APP_BRANCH=${branchToUse}"
             ]) {
-            sh(label: 'Esperar VM lista', script: '''
+              sh(label: 'Esperar VM lista', script: '''
 set -e
 export SSHPASS="$VM_PASSWORD"
 for i in $(seq 1 30); do
@@ -302,7 +247,7 @@ echo "Timeout esperando SSH en $TARGET_IP"
 exit 1
 ''')
 
-            sh(label: 'Sincronizar repositorio', script: '''
+              sh(label: 'Sincronizar repositorio', script: '''
 set -e
 export SSHPASS="$VM_PASSWORD"
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
@@ -351,7 +296,7 @@ chmod +x mvnw || true
 git config --global --add safe.directory "$REMOTE_DIR" || true
 EOF
 ''')
-          }
+            }
           }
         }
       }
@@ -546,20 +491,17 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenki
         ]) {
           script {
             def imageTag = params.K8S_IMAGE_TAG?.trim()
-            if (!imageTag) {
-              imageTag = env.GIT_COMMIT ? env.GIT_COMMIT.take(7) : 'latest'
-            }
-            
+            if (!imageTag) { imageTag = env.GIT_COMMIT ? env.GIT_COMMIT.take(7) : 'latest' }
             def imageRegistry = params.K8S_IMAGE_REGISTRY?.trim()
-            
+
             if (params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean()) {
-              // Para Minikube: construir imagen local en VM y cargar a Minikube
               echo "🔨 Construyendo imagen Docker para Minikube: ${env.SERVICE_NAME}"
-              
               withEnv([
                 "TARGET_IP=${env.DROPLET_IP}",
                 "REMOTE_DIR=${env.REMOTE_DIR}",
-                "SERVICE_NAME=${env.SERVICE_NAME}"
+                "SERVICE_NAME=${env.SERVICE_NAME}",
+                // 👇 AÑADIDO: pasamos la IP de Minikube a este scope
+                "MINIKUBE_VM_IP=${env.MINIKUBE_VM_IP}"
               ]) {
                 sh '''
 set -e
@@ -600,11 +542,11 @@ sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 # --- TRANSFIERE: DE JENKINS A VM MINIKUBE ---
 sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   "./${SERVICE_NAME}-minikube.tar.gz" \
-  jenkins@"$MINIKUBE_IP":"/tmp/${SERVICE_NAME}-minikube.tar.gz"
+  jenkins@"$MINIKUBE_VM_IP":"/tmp/${SERVICE_NAME}-minikube.tar.gz"
 
 # --- CARGA IMAGEN EN MINIKUBE ---
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  jenkins@"$MINIKUBE_IP" "SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOFLOAD'
+  jenkins@"$MINIKUBE_VM_IP" "SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOFLOAD'
 set -euo pipefail
 export PATH="/usr/local/bin:$PATH"
 docker load -i "/tmp/${SERVICE_NAME}-minikube.tar.gz"
@@ -615,12 +557,9 @@ EOFLOAD
 '''
               }
             }
-            
+
             if (params.DEPLOY_TO_K8S?.toString()?.toBoolean()) {
-              if (!imageRegistry) {
-                error "El parámetro K8S_IMAGE_REGISTRY no puede ser vacío."
-              }
-              // Para GKE: construir y subir a GCR (código original)
+              if (!imageRegistry) { error "El parámetro K8S_IMAGE_REGISTRY no puede ser vacío." }
               echo "🔨 Construyendo imagen Docker para GKE: ${env.SERVICE_NAME}"
               echo "📦 Registro: ${imageRegistry}"
               echo "🏷️  Tag: ${imageTag}"
@@ -703,15 +642,10 @@ EOFBUILD
     }
 
     stage('Deploy to Minikube') {
-      when {
-        expression { return params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean() }
-      }
+      when { expression { return params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean() } }
       steps {
-        withCredentials([
-          string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')
-        ]) {
+        withCredentials([ string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD') ]) {
           script {
-            // Mapeo de servicios a puertos
             def servicePorts = [
               'user-service': '8085',
               'product-service': '8083',
@@ -721,11 +655,10 @@ EOFBUILD
               'favourite-service': '8086',
               'service-discovery': '8761'
             ]
-            
             def servicePort = servicePorts[env.SERVICE_NAME] ?: '8080'
-            
+
             echo "🚀 Desplegando ${env.SERVICE_NAME} a Minikube en VM ${env.MINIKUBE_VM_IP}..."
-            
+
             withEnv([
               "TARGET_IP=${env.MINIKUBE_VM_IP}",
               "SERVICE_NAME=${env.SERVICE_NAME}",
@@ -849,12 +782,10 @@ EOFDEPLOY
           }
         }
       }
-  }
+    }
 
     stage('Deploy to Kubernetes (GKE)') {
-      when {
-        expression { return params.DEPLOY_TO_K8S?.toString()?.toBoolean() }
-      }
+      when { expression { return params.DEPLOY_TO_K8S?.toString()?.toBoolean() } }
       steps {
         withCredentials([
           string(credentialsId: 'gcp-project-id', variable: 'GCP_PROJECT_ID'),
@@ -868,20 +799,14 @@ EOFDEPLOY
             }
 
             def imageRegistry = params.K8S_IMAGE_REGISTRY?.trim()
-            if (!imageRegistry) {
-              error "El parámetro K8S_IMAGE_REGISTRY no puede ser vacío."
-            }
+            if (!imageRegistry) { error "El parámetro K8S_IMAGE_REGISTRY no puede ser vacío." }
 
             def clusterName = params.GKE_CLUSTER_NAME?.trim()
             def clusterLocation = params.GKE_LOCATION?.trim()
-            if (!clusterName || !clusterLocation) {
-              error "Debe especificar GKE_CLUSTER_NAME y GKE_LOCATION."
-            }
+            if (!clusterName || !clusterLocation) { error "Debe especificar GKE_CLUSTER_NAME y GKE_LOCATION." }
 
             def infraRepoUrl = params.INFRA_REPO_URL?.trim()
-            if (!infraRepoUrl) {
-              error "El parámetro INFRA_REPO_URL es requerido para clonar los manifiestos."
-            }
+            if (!infraRepoUrl) { error "El parámetro INFRA_REPO_URL es requerido para clonar los manifiestos." }
             def infraRepoBranch = params.INFRA_REPO_BRANCH?.trim() ?: 'infra/master'
 
             def workspaceRoot = pwd()
@@ -921,16 +846,14 @@ jenkins/scripts/deploy-single-service-to-gke.sh
         }
       }
     }
-  }
 
+    // ⬇️ AHORA SÍ: este stage está DENTRO de "stages { }"
     stage('Wait for Service Discovery') {
       when {
         expression { env.SERVICE_NAME != 'service-discovery' && (params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean()) }
       }
       steps {
-        withCredentials([
-          string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')
-        ]) {
+        withCredentials([ string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD') ]) {
           script {
             withEnv([
               "TARGET_IP=${env.DROPLET_IP}",
@@ -962,15 +885,16 @@ exit 1
         }
       }
     }
+  } // ← cierra stages
 
   post {
     success {
       echo "✅ shipping-service-dev completado. Resultados almacenados en reports/test-reports-shipping-service.tar.gz (si aplica)."
       script {
         try {
-          sh("""curl -X POST "https://api.github.com/repos/OscarMURA/ecommerce-microservice-backend-app/statuses/${env.GIT_COMMIT}" \\
-            -H "Authorization: token \${GITHUB_TOKEN}" \\
-            -H "Content-Type: application/json" \\
+          sh("""curl -X POST "https://api.github.com/repos/OscarMURA/ecommerce-microservice-backend-app/statuses/${env.GIT_COMMIT}" \
+            -H "Authorization: token \${GITHUB_TOKEN}" \
+            -H "Content-Type: application/json" \
             -d '{"state":"success","description":"Jenkins: Build passed","context":"ci/jenkins/shipping-service"}'""")
         } catch (Exception e) {
           echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
@@ -981,17 +905,15 @@ exit 1
       echo "❌ shipping-service-dev falló. Revisa los logs para detalles."
       script {
         try {
-          sh("""curl -X POST "https://api.github.com/repos/OscarMURA/ecommerce-microservice-backend-app/statuses/${env.GIT_COMMIT}" \\
-            -H "Authorization: token \${GITHUB_TOKEN}" \\
-            -H "Content-Type: application/json" \\
+          sh("""curl -X POST "https://api.github.com/repos/OscarMURA/ecommerce-microservice-backend-app/statuses/${env.GIT_COMMIT}" \
+            -H "Authorization: token \${GITHUB_TOKEN}" \
+            -H "Content-Type: application/json" \
             -d '{"state":"failure","description":"Jenkins: Build failed","context":"ci/jenkins/shipping-service"}'""")
         } catch (Exception e) {
           echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
         }
       }
     }
-    always {
-      cleanWs()
-    }
+    always { cleanWs() }
   }
 }
