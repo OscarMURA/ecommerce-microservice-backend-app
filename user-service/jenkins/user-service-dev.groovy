@@ -173,8 +173,8 @@ pipeline {
             def fetchIp = { vmName ->
               sh(script: """
 set -e
-curl -sS -H \"Authorization: Bearer ${DO_TOKEN}\" \"https://api.digitalocean.com/v2/droplets?per_page=200\" \
-  | jq -r --arg NAME \"${vmName}\" '.droplets[] | select(.name==\$NAME) | .networks.v4[] | select(.type==\\"public\\") | .ip_address' \
+curl -sS -H "Authorization: Bearer ${DO_TOKEN}" "https://api.digitalocean.com/v2/droplets?per_page=200" \
+  | jq -r --arg NAME \"${vmName}\" '.droplets[] | select(.name==\$NAME) | .networks.v4[] | select(.type==\"public\") | .ip_address' \
   | head -n1
 """, returnStdout: true).trim()
             }
@@ -962,7 +962,7 @@ for i in $(seq 1 30); do
 
     # Health check dentro del deployment
     if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      jenkins@"$TARGET_IP" "kubectl exec -n $NAMESPACE deployment/service-discovery -- curl -s --max-time 5 http://localhost:8761/actuator/health" | grep -q '\"status\"[[:space:]]*:[[:space:]]*\"UP\"'; then
+      jenkins@"$TARGET_IP" "kubectl exec -n $NAMESPACE deployment/service-discovery -- curl -s --max-time 5 http://localhost:8761/actuator/health" | grep -q '"status"[[:space:]]*:[[:space:]]*"UP"'; then
       echo "✅ Service Discovery saludable"
       exit 0
     fi

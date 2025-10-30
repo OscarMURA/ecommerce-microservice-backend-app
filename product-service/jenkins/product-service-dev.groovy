@@ -169,11 +169,11 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'digitalocean-token', variable: 'DO_TOKEN')]) {
           script {
-            def fetchIp = {
+            def fetchIp = { vmName ->
               sh(script: """
 set -e
 curl -sS -H \"Authorization: Bearer ${DO_TOKEN}\" \"https://api.digitalocean.com/v2/droplets?per_page=200\" \
-  | jq -r --arg NAME \"${params.VM_NAME}\" '.droplets[] | select(.name==\$NAME) | .networks.v4[] | select(.type==\"public\") | .ip_address' \
+  | jq -r --arg NAME \"${vmName}\" '.droplets[] | select(.name==\$NAME) | .networks.v4[] | select(.type==\"public\") | .ip_address' \
   | head -n1
 """, returnStdout: true).trim()
             }
@@ -930,7 +930,7 @@ for i in $(seq 1 30); do
   if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     jenkins@"$TARGET_IP" "kubectl get pods -n $NAMESPACE -l app=service-discovery --field-selector=status.phase=Running" | grep -q service-discovery; then
     if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      jenkins@"$TARGET_IP" "kubectl exec -n $NAMESPACE deployment/service-discovery -- curl -s --max-time 5 http://localhost:8761/actuator/health" | grep -q '\"status\"[[:space:]]*:[[:space:]]*\"UP\"'; then
+      jenkins@"$TARGET_IP" "kubectl exec -n $NAMESPACE deployment/service-discovery -- curl -s --max-time 5 http://localhost:8761/actuator/health" | grep -q '"status"[[:space:]]*:[[:space:]]*"UP"'; then
       echo "✅ Service Discovery saludable"
       exit 0
     fi
