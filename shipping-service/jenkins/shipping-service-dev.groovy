@@ -849,7 +849,7 @@ EOFDEPLOY
           }
         }
       }
-    }
+  }
 
     stage('Deploy to Kubernetes (GKE)') {
       when {
