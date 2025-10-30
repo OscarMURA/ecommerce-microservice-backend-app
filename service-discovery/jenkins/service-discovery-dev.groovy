@@ -3,7 +3,8 @@ pipeline {
   options { timestamps(); disableConcurrentBuilds() }
 
   parameters {
-    string(name: 'VM_NAME', defaultValue: 'ecommerce-integration-runner', description: 'Nombre de la VM creada por Jenkins_Create_VM')
+    string(name: 'VM_NAME', defaultValue: 'ecommerce-integration-runner', description: 'Nombre de la VM de BUILD/TEST (runner)')
+    string(name: 'MINIKUBE_VM_NAME', defaultValue: 'ecommerce-minikube-dev', description: 'Nombre de la VM que tiene Minikube')
     string(name: 'VM_REGION', defaultValue: 'nyc3', description: 'Región del droplet (usado si hay que crearlo)')
     string(name: 'VM_SIZE', defaultValue: 's-1vcpu-2gb', description: 'Tamaño del droplet (usado si hay que crearlo)')
     string(name: 'VM_IMAGE', defaultValue: 'ubuntu-22-04-x64', description: 'Imagen del droplet (usado si hay que crearlo)')
@@ -169,16 +170,17 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'digitalocean-token', variable: 'DO_TOKEN')]) {
           script {
-            def fetchIp = {
+            def fetchIp = { vmName ->
               sh(script: """
 set -e
-curl -sS -H \"Authorization: Bearer ${DO_TOKEN}\" \"https://api.digitalocean.com/v2/droplets?per_page=200\" \
-  | jq -r --arg NAME \"${params.VM_NAME}\" '.droplets[] | select(.name==\$NAME) | .networks.v4[] | select(.type==\"public\") | .ip_address' \
+curl -sS -H \"Authorization: Bearer  [1;94m$DO_TOKEN\" \"https://api.digitalocean.com/v2/droplets?per_page=200\" \
+  | jq -r --arg NAME \"${vmName}\" '.droplets[] | select(.name==\$NAME) | .networks.v4[] | select(.type==\"public\") | .ip_address' \
   | head -n1
 """, returnStdout: true).trim()
             }
-
-            def currentIp = fetchIp()
+            def buildIp = fetchIp(params.VM_NAME)
+            def minikubeIp = fetchIp(params.MINIKUBE_VM_NAME)
+            def currentIp = buildIp
             if (!currentIp) {
               echo "No se encontró la VM ${params.VM_NAME}. Solicitando creación..."
               def baseJob = params.JENKINS_CREATE_VM_JOB?.trim() ?: ''
@@ -231,15 +233,29 @@ curl -sS -H \"Authorization: Bearer ${DO_TOKEN}\" \"https://api.digitalocean.com
                 error "No se pudo invocar el pipeline Jenkins_Create_VM. Revisa el parámetro 'JENKINS_CREATE_VM_JOB' o proporciona un sufijo válido (p. ej. '${suggestion}'). Último error: ${lastError?.message}"
               }
               sleep(time: 30, unit: 'SECONDS')
-              currentIp = fetchIp()
+              buildIp = fetchIp(params.VM_NAME)
+              currentIp = buildIp
             }
-
-            if (!currentIp) {
-              error "No se pudo obtener la IP pública de ${params.VM_NAME} después de intentar crearla."
+            if (!minikubeIp) {
+              echo "No se encontró la VM ${params.MINIKUBE_VM_NAME}. Intentando crearla..."
+              def candidate = params.JENKINS_CREATE_VM_JOB?.trim() ?: ''
+              if (candidate) {
+                try {
+                  build job: candidate, wait: true, propagate: true, parameters: [
+                    string(name: 'ACTION', value: 'create'),
+                    string(name: 'VM_CONFIG', value: 'ecommerce_minikube'),
+                    booleanParam(name: 'ARCHIVE_METADATA', value: true)
+                  ]
+                } catch (Exception ex) { echo "No se pudo crear VM minikube: ${ex.message}" }
+                sleep(time: 30, unit: 'SECONDS')
+                minikubeIp = fetchIp(params.MINIKUBE_VM_NAME)
+              }
             }
-
-            env.DROPLET_IP = currentIp
-            echo "VM disponible en IP ${env.DROPLET_IP}"
+            env.DROPLET_IP = buildIp
+            env.BUILD_VM_IP = buildIp
+            env.MINIKUBE_VM_IP = minikubeIp
+            echo "BUILD VM IP: ${env.BUILD_VM_IP}"
+            echo "MINIKUBE VM IP: ${env.MINIKUBE_VM_IP}"
           }
         }
       }
@@ -541,7 +557,8 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenki
               echo "🔨 Construyendo imagen Docker para Minikube: ${env.SERVICE_NAME}"
               
               withEnv([
-                "TARGET_IP=${env.DROPLET_IP}",
+                "BUILD_IP=${env.BUILD_VM_IP}",
+                "MINIKUBE_IP=${env.MINIKUBE_VM_IP}",
                 "REMOTE_DIR=${env.REMOTE_DIR}",
                 "SERVICE_NAME=${env.SERVICE_NAME}"
               ]) {
@@ -549,9 +566,9 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenki
 set -e
 export SSHPASS="$VM_PASSWORD"
 
-echo "🔨 Construyendo imagen Docker en la VM para Minikube..."
+echo "🔨 Construyendo imagen Docker en la VM de BUILD..."
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  jenkins@"$TARGET_IP" "REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOFBUILD'
+  jenkins@"$BUILD_IP" "REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOFBUILD'
 set -euo pipefail
 
 cd "$REMOTE_DIR"
@@ -583,14 +600,25 @@ docker build -t "${SERVICE_NAME}:minikube" "$REMOTE_DIR" \
     exit 1
   }
 
-echo "📦 Cargando imagen a Minikube..."
-minikube image load "${SERVICE_NAME}:minikube" || {
-  echo "❌ Error cargando imagen a Minikube"
-  exit 1
-}
-
-echo "✅ Imagen construida y cargada exitosamente a Minikube"
+echo "📦 Empaquetando imagen..."
+docker save "${SERVICE_NAME}:minikube" | gzip > "/tmp/${SERVICE_NAME}-minikube.tar.gz"
 EOFBUILD
+
+echo "🚚 Transfiriendo imagen a la VM de Minikube..."
+sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$BUILD_IP":"/tmp/${SERVICE_NAME}-minikube.tar.gz" \
+  jenkins@"$MINIKUBE_IP":"/tmp/${SERVICE_NAME}-minikube.tar.gz"
+
+echo "📦 Cargando imagen en Docker y Minikube (VM Minikube)..."
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$MINIKUBE_IP" "bash -s" <<'EOFLOAD'
+set -euo pipefail
+export PATH="/usr/local/bin:$PATH"
+docker load -i "/tmp/${SERVICE_NAME}-minikube.tar.gz"
+/usr/local/bin/minikube image load "${SERVICE_NAME}:minikube"
+rm -f "/tmp/${SERVICE_NAME}-minikube.tar.gz"
+echo "✅ Imagen disponible en Minikube"
+EOFLOAD
 '''
               }
             }
@@ -703,10 +731,10 @@ EOFBUILD
             
             def servicePort = servicePorts[env.SERVICE_NAME] ?: '8080'
             
-            echo "🚀 Desplegando ${env.SERVICE_NAME} a Minikube en VM ${env.DROPLET_IP}..."
+            echo "🚀 Desplegando ${env.SERVICE_NAME} a Minikube en VM ${env.MINIKUBE_VM_IP}..."
             
             withEnv([
-              "TARGET_IP=${env.DROPLET_IP}",
+              "TARGET_IP=${env.MINIKUBE_VM_IP}",
               "SERVICE_NAME=${env.SERVICE_NAME}",
               "SERVICE_PORT=${servicePort}",
               "NAMESPACE=ecommerce",
@@ -716,10 +744,7 @@ EOFBUILD
 set -e
 export SSHPASS="$VM_PASSWORD"
 
-echo "🚀 Desplegando $SERVICE_NAME a Minikube..."
-sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  jenkins@"$TARGET_IP" "SERVICE_NAME='$SERVICE_NAME' SERVICE_PORT='$SERVICE_PORT' NAMESPACE='$NAMESPACE' REMOTE_DIR='$REMOTE_DIR' bash -s" <<'EOFDEPLOY'
-set -euo pipefail
+export PATH="/usr/local/bin:$PATH"
 
 # Configurar contexto de Minikube
 kubectl config use-context minikube

@@ -541,7 +541,8 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenki
               echo "🔨 Construyendo imagen Docker para Minikube: ${env.SERVICE_NAME}"
               
               withEnv([
-                "TARGET_IP=${env.DROPLET_IP}",
+                "BUILD_IP=${env.BUILD_VM_IP}",
+                "MINIKUBE_IP=${env.MINIKUBE_VM_IP}",
                 "REMOTE_DIR=${env.REMOTE_DIR}",
                 "SERVICE_NAME=${env.SERVICE_NAME}"
               ]) {
@@ -549,9 +550,9 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenki
 set -e
 export SSHPASS="$VM_PASSWORD"
 
-echo "🔨 Construyendo imagen Docker en la VM para Minikube..."
+echo "🔨 Construyendo imagen Docker en la VM de BUILD..."
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  jenkins@"$TARGET_IP" "REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOFBUILD'
+  jenkins@"$BUILD_IP" "REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOFBUILD'
 set -euo pipefail
 
 cd "$REMOTE_DIR"
@@ -583,14 +584,25 @@ docker build -t "${SERVICE_NAME}:minikube" "$REMOTE_DIR" \
     exit 1
   }
 
-echo "📦 Cargando imagen a Minikube..."
-minikube image load "${SERVICE_NAME}:minikube" || {
-  echo "❌ Error cargando imagen a Minikube"
-  exit 1
-}
-
-echo "✅ Imagen construida y cargada exitosamente a Minikube"
+echo "📦 Empaquetando imagen..."
+docker save "${SERVICE_NAME}:minikube" | gzip > "/tmp/${SERVICE_NAME}-minikube.tar.gz"
 EOFBUILD
+
+echo "🚚 Transfiriendo imagen a la VM de Minikube..."
+sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$BUILD_IP":"/tmp/${SERVICE_NAME}-minikube.tar.gz" \
+  jenkins@"$MINIKUBE_IP":"/tmp/${SERVICE_NAME}-minikube.tar.gz"
+
+echo "📦 Cargando imagen en Docker y Minikube (VM Minikube)..."
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$MINIKUBE_IP" "bash -s" <<'EOFLOAD'
+set -euo pipefail
+export PATH="/usr/local/bin:$PATH"
+docker load -i "/tmp/${SERVICE_NAME}-minikube.tar.gz"
+/usr/local/bin/minikube image load "${SERVICE_NAME}:minikube"
+rm -f "/tmp/${SERVICE_NAME}-minikube.tar.gz"
+echo "✅ Imagen disponible en Minikube"
+EOFLOAD
 '''
               }
             }
@@ -608,7 +620,7 @@ EOFBUILD
                 "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
                 "IMAGE_REGISTRY=${imageRegistry}",
                 "IMAGE_TAG=${imageTag}",
-                "TARGET_IP=${env.DROPLET_IP}",
+                "TARGET_IP=${env.BUILD_VM_IP}",
                 "REMOTE_DIR=${env.REMOTE_DIR}",
                 "SERVICE_NAME=${env.SERVICE_NAME}"
               ]) {
@@ -703,10 +715,10 @@ EOFBUILD
             
             def servicePort = servicePorts[env.SERVICE_NAME] ?: '8080'
             
-            echo "🚀 Desplegando ${env.SERVICE_NAME} a Minikube en VM ${env.DROPLET_IP}..."
+            echo "🚀 Desplegando ${env.SERVICE_NAME} a Minikube en VM ${env.MINIKUBE_VM_IP}..."
             
             withEnv([
-              "TARGET_IP=${env.DROPLET_IP}",
+              "TARGET_IP=${env.MINIKUBE_VM_IP}",
               "SERVICE_NAME=${env.SERVICE_NAME}",
               "SERVICE_PORT=${servicePort}",
               "NAMESPACE=ecommerce",
@@ -720,6 +732,8 @@ echo "🚀 Desplegando $SERVICE_NAME a Minikube..."
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   jenkins@"$TARGET_IP" "SERVICE_NAME='$SERVICE_NAME' SERVICE_PORT='$SERVICE_PORT' NAMESPACE='$NAMESPACE' REMOTE_DIR='$REMOTE_DIR' bash -s" <<'EOFDEPLOY'
 set -euo pipefail
+
+export PATH="/usr/local/bin:$PATH"
 
 # Configurar contexto de Minikube
 kubectl config use-context minikube
@@ -916,7 +930,7 @@ for i in $(seq 1 30); do
   if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     jenkins@"$TARGET_IP" "kubectl get pods -n $NAMESPACE -l app=service-discovery --field-selector=status.phase=Running" | grep -q service-discovery; then
     if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      jenkins@"$TARGET_IP" "kubectl exec -n $NAMESPACE deployment/service-discovery -- curl -s --max-time 5 http://localhost:8761/actuator/health" | grep -q '"status"\s*:\s*"UP"'; then
+      jenkins@"$TARGET_IP" "kubectl exec -n $NAMESPACE deployment/service-discovery -- curl -s --max-time 5 http://localhost:8761/actuator/health" | grep -q '\"status\"[[:space:]]*:[[:space:]]*\"UP\"'; then
       echo "✅ Service Discovery saludable"
       exit 0
     fi
@@ -933,6 +947,8 @@ exit 1
         }
       }
     }
+
+    
 
   post {
     success {
