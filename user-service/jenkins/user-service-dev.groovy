@@ -1011,4 +1011,5 @@ exit 1
       cleanWs()
     }
   }
-}
+
+// End of pipeline
