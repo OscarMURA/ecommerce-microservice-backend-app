@@ -174,7 +174,7 @@ pipeline {
               sh(script: """
 set -e
 curl -sS -H "Authorization: Bearer ${DO_TOKEN}" "https://api.digitalocean.com/v2/droplets?per_page=200" \
-  | jq -r --arg NAME "${vmName}" '.droplets[] | select(.name==$NAME) | .networks.v4[] | select(.type=="public") | .ip_address' \
+  | jq -r --arg NAME \"${vmName}\" '.droplets[] | select(.name==\$NAME) | .networks.v4[] | select(.type==\"public\") | .ip_address' \
   | head -n1
 """, returnStdout: true).trim()
             }
