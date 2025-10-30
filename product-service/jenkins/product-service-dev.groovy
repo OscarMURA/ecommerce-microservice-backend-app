@@ -535,14 +535,17 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenki
             }
             
             def imageRegistry = params.K8S_IMAGE_REGISTRY?.trim()
-            
+            if (!imageRegistry) {
+              error "El parámetro K8S_IMAGE_REGISTRY no puede ser vacío."
+            }
+
             if (params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean()) {
               // Para Minikube: construir imagen local en VM y cargar a Minikube
               echo "🔨 Construyendo imagen Docker para Minikube: ${env.SERVICE_NAME}"
               
               withEnv([
-                "BUILD_IP=${env.BUILD_VM_IP}",
-                "MINIKUBE_IP=${env.MINIKUBE_VM_IP}",
+                "BUILD_IP=${env.DROPLET_IP}",
+                "MINIKUBE_IP=${env.DROPLET_IP}",
                 "REMOTE_DIR=${env.REMOTE_DIR}",
                 "SERVICE_NAME=${env.SERVICE_NAME}"
               ]) {
@@ -602,9 +605,6 @@ EOFLOAD
             }
             
             if (params.DEPLOY_TO_K8S?.toString()?.toBoolean()) {
-              if (!imageRegistry) {
-                error "El parámetro K8S_IMAGE_REGISTRY no puede ser vacío."
-              }
               // Para GKE: construir y subir a GCR (código original)
               echo "🔨 Construyendo imagen Docker para GKE: ${env.SERVICE_NAME}"
               echo "📦 Registro: ${imageRegistry}"
@@ -614,7 +614,7 @@ EOFLOAD
                 "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
                 "IMAGE_REGISTRY=${imageRegistry}",
                 "IMAGE_TAG=${imageTag}",
-                "TARGET_IP=${env.BUILD_VM_IP}",
+                "TARGET_IP=${env.DROPLET_IP}",
                 "REMOTE_DIR=${env.REMOTE_DIR}",
                 "SERVICE_NAME=${env.SERVICE_NAME}"
               ]) {
@@ -709,10 +709,10 @@ EOFBUILD
             
             def servicePort = servicePorts[env.SERVICE_NAME] ?: '8080'
             
-            echo "🚀 Desplegando ${env.SERVICE_NAME} a Minikube en VM ${env.MINIKUBE_VM_IP}..."
+            echo "🚀 Desplegando ${env.SERVICE_NAME} a Minikube en VM ${env.DROPLET_IP}..."
             
             withEnv([
-              "TARGET_IP=${env.MINIKUBE_VM_IP}",
+              "TARGET_IP=${env.DROPLET_IP}",
               "SERVICE_NAME=${env.SERVICE_NAME}",
               "SERVICE_PORT=${servicePort}",
               "NAMESPACE=ecommerce",
