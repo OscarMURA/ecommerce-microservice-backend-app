@@ -921,7 +921,6 @@ jenkins/scripts/deploy-single-service-to-gke.sh
         }
       }
     }
-  }
 
     stage('Wait for Service Discovery') {
       when {
@@ -962,6 +961,8 @@ exit 1
         }
       }
     }
+
+  }
 
   post {
     success {
