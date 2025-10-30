@@ -404,7 +404,7 @@ PY
 
   if [ -n "$summary" ]; then
     echo "📊 ${module} -> ${summary}"
-  else:
+  else
     echo "⚠️ No se pudo extraer resumen para ${module}"
   fi
 }
@@ -476,7 +476,7 @@ PY
 
   if [ -n "$summary" ]; then
     echo "📊 ${module} -> ${summary}"
-  else:
+  else
     echo "⚠️ No se pudo extraer resumen para ${module}"
   fi
 }

@@ -557,7 +557,8 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenki
               echo "🔨 Construyendo imagen Docker para Minikube: ${env.SERVICE_NAME}"
               
               withEnv([
-                "TARGET_IP=${env.DROPLET_IP}",
+                "BUILD_IP=${env.BUILD_VM_IP}",
+                "MINIKUBE_IP=${env.MINIKUBE_VM_IP}",
                 "REMOTE_DIR=${env.REMOTE_DIR}",
                 "SERVICE_NAME=${env.SERVICE_NAME}"
               ]) {
@@ -567,7 +568,7 @@ export SSHPASS="$VM_PASSWORD"
 
 # --- CONSTRUCCIÓN Y EMPAQUETADO EN VM BUILD ---
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  jenkins@"$TARGET_IP" "REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOFBUILD'
+  jenkins@"$BUILD_IP" "REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOFBUILD'
 set -euo pipefail
 cd "$REMOTE_DIR"
 SERVICE_DIR="$REMOTE_DIR/$SERVICE_NAME"
@@ -594,7 +595,7 @@ EOFBUILD
 
 # --- TRANSFIERE: DE VM BUILD A JENKINS ---
 sshpass -e scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  jenkins@"$TARGET_IP":"/tmp/${SERVICE_NAME}-minikube.tar.gz" \
+  jenkins@"$BUILD_IP":"/tmp/${SERVICE_NAME}-minikube.tar.gz" \
   ./
 
 # --- TRANSFIERE: DE JENKINS A VM MINIKUBE ---

@@ -566,8 +566,8 @@ sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jenki
               echo "🔨 Construyendo imagen Docker para Minikube: ${env.SERVICE_NAME}"
               
               withEnv([
-                "BUILD_IP=${env.DROPLET_IP}",
-                "MINIKUBE_IP=${env.DROPLET_IP}",
+                "BUILD_IP=${env.BUILD_VM_IP}",
+                "MINIKUBE_IP=${env.MINIKUBE_VM_IP}",
                 "REMOTE_DIR=${env.REMOTE_DIR}",
                 "SERVICE_NAME=${env.SERVICE_NAME}"
               ]) {
@@ -731,10 +731,10 @@ EOFBUILD
             
             def servicePort = servicePorts[env.SERVICE_NAME] ?: '8080'
             
-            echo "🚀 Desplegando ${env.SERVICE_NAME} a Minikube en VM ${env.DROPLET_IP}..."
+            echo "🚀 Desplegando ${env.SERVICE_NAME} a Minikube en VM ${env.MINIKUBE_VM_IP}..."
             
             withEnv([
-              "TARGET_IP=${env.DROPLET_IP}",
+              "TARGET_IP=${env.MINIKUBE_VM_IP}",
               "SERVICE_NAME=${env.SERVICE_NAME}",
               "SERVICE_PORT=${servicePort}",
               "NAMESPACE=ecommerce",

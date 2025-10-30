@@ -738,6 +738,9 @@ EOFBUILD
 set -e
 export SSHPASS="$VM_PASSWORD"
 
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$TARGET_IP" "SERVICE_NAME='$SERVICE_NAME' SERVICE_PORT='$SERVICE_PORT' NAMESPACE='$NAMESPACE' REMOTE_DIR='$REMOTE_DIR' bash -s" <<'EOFDEPLOY'
+set -euo pipefail
 export PATH="/usr/local/bin:$PATH"
 
 # Configurar contexto de Minikube (solo si no está ya activo)
