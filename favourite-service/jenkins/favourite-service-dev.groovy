@@ -859,6 +859,98 @@ EOFDEPLOY
       }
     }
 
+    stage('🏥 Health Check en Minikube') {
+      when {
+        expression { return params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean() }
+      }
+      steps {
+        withCredentials([string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')]) {
+          script {
+            def servicePorts = [
+              'user-service': '8085',
+              'product-service': '8083',
+              'order-service': '8081',
+              'payment-service': '8082',
+              'shipping-service': '8084',
+              'favourite-service': '8086',
+              'service-discovery': '8761'
+            ]
+            def servicePort = servicePorts[env.SERVICE_NAME] ?: '8080'
+
+            echo "🏥 Verificando salud del servicio ${env.SERVICE_NAME} en Minikube..."
+            
+            // Esperar a que el servicio se inicialice
+            echo "⏳ Esperando 30 segundos para que el servicio se inicialice..."
+            sleep(time: 30, unit: 'SECONDS')
+            
+            withEnv([
+              "TARGET_IP=${env.MINIKUBE_VM_IP}",
+              "SERVICE_NAME=${env.SERVICE_NAME}",
+              "SERVICE_PORT=${servicePort}",
+              "NAMESPACE=ecommerce"
+            ]) {
+              sh '''
+set -e
+export SSHPASS="$VM_PASSWORD"
+
+echo "🔍 Verificando estado del deployment..."
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\
+  jenkins@"$TARGET_IP" "SERVICE_NAME='$SERVICE_NAME' SERVICE_PORT='$SERVICE_PORT' NAMESPACE='$NAMESPACE' bash -s" <<'EOFHEALTH'
+set -euo pipefail
+export PATH="/usr/local/bin:$PATH"
+
+# Verificar que el pod esté running
+echo "📦 Estado del pod:"
+POD_STATUS=$(kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME" -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "UNKNOWN")
+echo "Estado: $POD_STATUS"
+
+if [ "$POD_STATUS" != "Running" ]; then
+  echo "❌ Pod no está en estado Running"
+  kubectl get pods -n "$NAMESPACE" -l app="$SERVICE_NAME" -o wide
+  exit 1
+fi
+
+# Verificar health endpoint con reintentos (sin kubectl wait)
+echo "🏥 Verificando health endpoint..."
+MAX_RETRIES=10
+RETRY_COUNT=0
+HEALTH_STATUS=""
+
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+  HEALTH_RESPONSE=$(kubectl exec -n "$NAMESPACE" deployment/"$SERVICE_NAME" -- curl -s http://localhost:"$SERVICE_PORT"/${SERVICE_NAME}/actuator/health 2>/dev/null || echo "ERROR")
+  
+  if echo "$HEALTH_RESPONSE" | grep -q '"status":"UP"' || echo "$HEALTH_RESPONSE" | grep -q '"status" : "UP"'; then
+    HEALTH_STATUS="UP"
+    echo "✅ Servicio $SERVICE_NAME está UP"
+    echo "$HEALTH_RESPONSE"
+    break
+  else
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    echo "⚠️  Intento $RETRY_COUNT/$MAX_RETRIES - Servicio no está listo aún..."
+    if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+      sleep 10
+    fi
+  fi
+done
+
+if [ "$HEALTH_STATUS" != "UP" ]; then
+  echo "❌ Health check falló después de $MAX_RETRIES intentos"
+  echo "📋 Logs del servicio:"
+  kubectl logs -n "$NAMESPACE" deployment/"$SERVICE_NAME" --tail=50
+  exit 1
+fi
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "✅ Health check exitoso para $SERVICE_NAME"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+EOFHEALTH
+'''
+            }
+          }
+        }
+      }
+    }
+
     stage('Deploy to Kubernetes (GKE)') {
       when {
         expression { return params.DEPLOY_TO_K8S?.toString()?.toBoolean() }
