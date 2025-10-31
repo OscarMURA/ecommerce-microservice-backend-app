@@ -133,6 +133,25 @@ pipeline {
               sh '''
 set -e
 
+# Configure PATH for gcloud and kubectl
+export PATH="/usr/local/bin:/usr/bin:/bin:/opt/google-cloud-sdk/google-cloud-sdk/bin:/opt/google-cloud-sdk/bin:$PATH"
+
+# Find and set gcloud path
+GCLOUD_PATH=$(which gcloud 2>/dev/null || find /usr -name gcloud 2>/dev/null | head -1 || find /opt -name gcloud 2>/dev/null | head -1 || echo "")
+if [ -z "$GCLOUD_PATH" ]; then
+  echo "❌ Error: gcloud no encontrado. Instálalo con:"
+  echo "   sudo apt-get update && sudo apt-get install -y google-cloud-sdk google-cloud-sdk-gke-gcloud-auth-plugin"
+  exit 1
+fi
+echo "✅ gcloud encontrado en: $GCLOUD_PATH"
+
+# Verify kubectl is available
+if ! command -v kubectl &> /dev/null; then
+  echo "❌ Error: kubectl no encontrado"
+  exit 1
+fi
+echo "✅ kubectl encontrado"
+
 echo "🔐 Autenticando con Google Cloud..."
 gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}"
 gcloud config set project "${GCP_PROJECT_ID}"
@@ -271,6 +290,21 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
             ]) {
               sh '''
 set -e
+
+# Configure PATH for gcloud and kubectl
+export PATH="/usr/local/bin:/usr/bin:/bin:/opt/google-cloud-sdk/google-cloud-sdk/bin:/opt/google-cloud-sdk/bin:$PATH"
+
+# Verify gcloud is available
+if ! command -v gcloud &> /dev/null; then
+  echo "❌ Error: gcloud no encontrado"
+  exit 1
+fi
+
+# Verify kubectl is available
+if ! command -v kubectl &> /dev/null; then
+  echo "❌ Error: kubectl no encontrado"
+  exit 1
+fi
 
 gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}"
 gcloud container clusters get-credentials "${GKE_CLUSTER_NAME}" \
