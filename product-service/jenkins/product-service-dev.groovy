@@ -783,11 +783,132 @@ fi
 if ! kubectl get secret ecommerce-secrets -n "$NAMESPACE" >/dev/null 2>&1; then
   echo "⚠️ Secret ecommerce-secrets no existe. Aplicando desde repositorio..."
   if [ -f "$REMOTE_DIR/minikube-deployment/minikube-secrets.yaml" ]; then
+        stage('Push Image to Docker Hub Registry') {
+          when {
+            expression { 
+              return params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean() || 
+                     params.DEPLOY_TO_K8S?.toString()?.toBoolean() 
+            }
+          }
+          steps {
+            withCredentials([
+              string(credentialsId: 'docker-user', variable: 'DOCKER_USER'),
+              string(credentialsId: 'docker-token', variable: 'DOCKER_TOKEN'),
+              string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')
+            ]) {
+              script {
+                def imageTag = params.K8S_IMAGE_TAG?.trim()
+                if (!imageTag) {
+                  imageTag = env.GIT_COMMIT ? env.GIT_COMMIT.take(7) : 'latest'
+                }
+            
+                def dockerHubRegistry = "${DOCKER_USER}/${env.SERVICE_NAME}"
+                def buildTag = "${imageTag}-build-${env.BUILD_NUMBER}"
+            
+                echo "📦 Guardando imagen en Docker Hub para reutilizar en Stage"
+                echo "🐳 Registry: ${dockerHubRegistry}"
+                echo "🏷️  Tags: ${imageTag}, ${buildTag}, latest"
+            
+                withEnv([
+                  "DOCKER_USER=${DOCKER_USER}",
+                  "DOCKER_TOKEN=${DOCKER_TOKEN}",
+                  "IMAGE_TAG=${imageTag}",
+                  "BUILD_TAG=${buildTag}",
+                  "DOCKER_HUB_REGISTRY=${dockerHubRegistry}",
+                  "SERVICE_NAME=${env.SERVICE_NAME}",
+                  "TARGET_IP=${env.DROPLET_IP}",
+                  "REMOTE_DIR=${env.REMOTE_DIR}"
+                ]) {
+                  sh '''
+    set -e
+    export SSHPASS="$VM_PASSWORD"
+
     kubectl apply -f "$REMOTE_DIR/minikube-deployment/minikube-secrets.yaml"
+    sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      jenkins@"$TARGET_IP" "DOCKER_USER='$DOCKER_USER' DOCKER_TOKEN='$DOCKER_TOKEN' IMAGE_TAG='$IMAGE_TAG' BUILD_TAG='$BUILD_TAG' DOCKER_HUB_REGISTRY='$DOCKER_HUB_REGISTRY' REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOFDOCKERHUB'
+    set -euo pipefail
+
   else
+    echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin || {
+      echo "❌ Error autenticando en Docker Hub"
+      exit 1
+    }
+
+    cd "$REMOTE_DIR"
+
+    SERVICE_DIR="$REMOTE_DIR/$SERVICE_NAME"
+    DOCKERFILE_PATH="$SERVICE_DIR/Dockerfile"
+
+    if [ ! -d "$SERVICE_DIR" ]; then
+      echo "❌ Error: Directorio $SERVICE_DIR no existe"
+      exit 1
+    fi
+
+    if [ ! -f "$DOCKERFILE_PATH" ]; then
+      echo "❌ Error: Dockerfile no encontrado en $DOCKERFILE_PATH"
+      exit 1
+    fi
+
     echo "❌ No se encontró minikube-secrets.yaml. Asegúrate de que el repositorio esté sincronizado."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🔨 Construyendo imagen para Docker Hub: $SERVICE_NAME"
+    echo "Registry: $DOCKER_HUB_REGISTRY"
+    echo "Tags: $IMAGE_TAG, $BUILD_TAG, latest"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Construir imagen con metadata adicional
+    docker build -t "${DOCKER_HUB_REGISTRY}:${IMAGE_TAG}" "$REMOTE_DIR" \
+      -f "$DOCKERFILE_PATH" \
+      --build-arg SERVICE_NAME="$SERVICE_NAME" \
+      --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+      --build-arg VCS_REF="$(git -C $REMOTE_DIR rev-parse --short HEAD 2>/dev/null || echo 'unknown')" \
+      || {
+        echo "❌ Error construyendo imagen para Docker Hub"
+        exit 1
+      }
+
   fi
+
+    # Push con tag del commit/versión
+    docker push "${DOCKER_HUB_REGISTRY}:${IMAGE_TAG}" || {
+      echo "❌ Error subiendo imagen con tag ${IMAGE_TAG}"
+      exit 1
+    }
+
+    # Tag y push con build number para trazabilidad
+    docker tag "${DOCKER_HUB_REGISTRY}:${IMAGE_TAG}" "${DOCKER_HUB_REGISTRY}:${BUILD_TAG}"
+    docker push "${DOCKER_HUB_REGISTRY}:${BUILD_TAG}" || {
+      echo "⚠️  Advertencia: Error subiendo tag de build"
+    }
+
+    # Tag y push como 'latest' para facilitar uso en stage
+    docker tag "${DOCKER_HUB_REGISTRY}:${IMAGE_TAG}" "${DOCKER_HUB_REGISTRY}:latest"
+    docker push "${DOCKER_HUB_REGISTRY}:latest" || {
+      echo "⚠️  Advertencia: Error subiendo tag latest"
+    }
+
 fi
+    echo "📍 Disponible en: ${DOCKER_HUB_REGISTRY}:${IMAGE_TAG}"
+    echo "📍 También como: ${DOCKER_HUB_REGISTRY}:${BUILD_TAG}"
+    echo "📍 Y como: ${DOCKER_HUB_REGISTRY}:latest"
+
+    # Logout de Docker Hub
+    docker logout || true
+    EOFDOCKERHUB
+    '''
+                }
+            
+                // Guardar información de la imagen para stage
+                env.DOCKER_HUB_IMAGE = "${dockerHubRegistry}:${imageTag}"
+                env.DOCKER_HUB_IMAGE_TAG = imageTag
+                env.DOCKER_HUB_BUILD_TAG = buildTag
+            
+                echo "✅ Imagen lista para usar en Stage:"
+                echo "   docker pull ${dockerHubRegistry}:${imageTag}"
+              }
+            }
+          }
+        }
 
 echo "📦 Desplegando $SERVICE_NAME en Minikube..."
 

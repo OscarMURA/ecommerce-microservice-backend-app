@@ -703,6 +703,92 @@ EOFBUILD
       }
     }
 
+    stage('Push Image to Docker Hub Registry') {
+      when {
+        expression {
+          return params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean() ||
+                 params.DEPLOY_TO_K8S?.toString()?.toBoolean()
+        }
+      }
+      steps {
+        withCredentials([
+          usernamePassword(credentialsId: 'docker-hub', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_TOKEN'),
+          string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')
+        ]) {
+          script {
+            def imageTag = params.K8S_IMAGE_TAG?.trim()
+            if (!imageTag) {
+              imageTag = env.GIT_COMMIT ? env.GIT_COMMIT.take(7) : 'latest'
+            }
+
+            withEnv([
+              "DOCKER_USER=${DOCKER_USER}",
+              "DOCKER_TOKEN=${DOCKER_TOKEN}",
+              "TARGET_IP=${env.DROPLET_IP}",
+              "REMOTE_DIR=${env.REMOTE_DIR}",
+              "SERVICE_NAME=${env.SERVICE_NAME}",
+              "IMAGE_TAG=${imageTag}"
+            ]) {
+              sh '''
+set -e
+export SSHPASS="$VM_PASSWORD"
+
+echo "🐳 Pushing image to Docker Hub..."
+sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  jenkins@"$TARGET_IP" "DOCKER_USER='$DOCKER_USER' DOCKER_TOKEN='$DOCKER_TOKEN' REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' IMAGE_TAG='$IMAGE_TAG' bash -s" <<'EOF'
+set -euo pipefail
+
+cd "$REMOTE_DIR"
+
+SERVICE_DIR="$REMOTE_DIR/$SERVICE_NAME"
+DOCKERFILE_PATH="$SERVICE_DIR/Dockerfile"
+
+if [ ! -d "$SERVICE_DIR" ]; then
+  echo "❌ Error: Directorio $SERVICE_DIR no existe"
+  exit 1
+fi
+
+if [ ! -f "$DOCKERFILE_PATH" ]; then
+  echo "❌ Error: Dockerfile no encontrado en $DOCKERFILE_PATH"
+  exit 1
+fi
+
+echo "🔐 Logging in to Docker Hub..."
+echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin
+
+echo "🏷️ Building image with metadata..."
+docker build -t "$DOCKER_USER/$SERVICE_NAME:$IMAGE_TAG" "$REMOTE_DIR" \
+  -f "$DOCKERFILE_PATH" \
+  --build-arg SERVICE_NAME="$SERVICE_NAME" \
+  --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+  --build-arg VCS_REF="$IMAGE_TAG" \
+  --build-arg VERSION="$IMAGE_TAG" \
+  || { echo "❌ Error building $SERVICE_NAME"; exit 1; }
+
+echo "📤 Pushing to Docker Hub..."
+docker push "$DOCKER_USER/$SERVICE_NAME:$IMAGE_TAG"
+
+# Tag and push additional tags
+docker tag "$DOCKER_USER/$SERVICE_NAME:$IMAGE_TAG" "$DOCKER_USER/$SERVICE_NAME:latest"
+docker push "$DOCKER_USER/$SERVICE_NAME:latest"
+
+if [ -n "${BUILD_NUMBER:-}" ]; then
+  docker tag "$DOCKER_USER/$SERVICE_NAME:$IMAGE_TAG" "$DOCKER_USER/$SERVICE_NAME:build-${BUILD_NUMBER}"
+  docker push "$DOCKER_USER/$SERVICE_NAME:build-${BUILD_NUMBER}"
+fi
+
+echo "🧹 Logging out from Docker Hub..."
+docker logout
+
+echo "✅ Image pushed successfully to Docker Hub"
+EOF
+'''
+            }
+          }
+        }
+      }
+    }
+
     stage('Deploy to Minikube') {
       when {
         expression { return params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean() }
