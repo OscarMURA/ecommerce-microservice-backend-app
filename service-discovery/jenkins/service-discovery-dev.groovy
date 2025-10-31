@@ -339,6 +339,8 @@ if [ ! -d backend/.git ]; then
   git clone "$REPO_URL" backend
 fi
 cd backend
+# Eliminar lock files de git si existen (pueden quedar de ejecuciones anteriores)
+rm -f .git/index.lock .git/refs/heads/*.lock .git/refs/remotes/*/*.lock 2>/dev/null || true
 git fetch origin "$APP_BRANCH" || git fetch origin
 if git rev-parse --verify "origin/$APP_BRANCH" >/dev/null 2>&1; then
   git checkout -B "$APP_BRANCH" "origin/$APP_BRANCH"
