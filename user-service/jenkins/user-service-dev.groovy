@@ -705,14 +705,15 @@ EOFBUILD
 
     stage('Push Image to Docker Hub Registry') {
       when {
-        expression {
-          return params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean() ||
-                 params.DEPLOY_TO_K8S?.toString()?.toBoolean()
+        expression { 
+          return params.DEPLOY_TO_MINIKUBE?.toString()?.toBoolean() || 
+                 params.DEPLOY_TO_K8S?.toString()?.toBoolean() 
         }
       }
       steps {
         withCredentials([
-          usernamePassword(credentialsId: 'docker-hub', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_TOKEN'),
+          string(credentialsId: 'docker-user', variable: 'DOCKER_USER'),
+          string(credentialsId: 'docker-token', variable: 'DOCKER_TOKEN'),
           string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD')
         ]) {
           script {
@@ -720,23 +721,38 @@ EOFBUILD
             if (!imageTag) {
               imageTag = env.GIT_COMMIT ? env.GIT_COMMIT.take(7) : 'latest'
             }
-
+            
+            def dockerHubRegistry = "${DOCKER_USER}/${env.SERVICE_NAME}"
+            def buildTag = "${imageTag}-build-${env.BUILD_NUMBER}"
+            
+            echo "📦 Guardando imagen en Docker Hub para reutilizar en Stage"
+            echo "🐳 Registry: ${dockerHubRegistry}"
+            echo "🏷️  Tags: ${imageTag}, ${buildTag}, latest"
+            
             withEnv([
               "DOCKER_USER=${DOCKER_USER}",
               "DOCKER_TOKEN=${DOCKER_TOKEN}",
-              "TARGET_IP=${env.DROPLET_IP}",
-              "REMOTE_DIR=${env.REMOTE_DIR}",
+              "IMAGE_TAG=${imageTag}",
+              "BUILD_TAG=${buildTag}",
+              "DOCKER_HUB_REGISTRY=${dockerHubRegistry}",
               "SERVICE_NAME=${env.SERVICE_NAME}",
-              "IMAGE_TAG=${imageTag}"
+              "TARGET_IP=${env.DROPLET_IP}",
+              "REMOTE_DIR=${env.REMOTE_DIR}"
             ]) {
               sh '''
 set -e
 export SSHPASS="$VM_PASSWORD"
 
-echo "🐳 Pushing image to Docker Hub..."
+echo "🐳 Subiendo imagen a Docker Hub para Stage..."
 sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  jenkins@"$TARGET_IP" "DOCKER_USER='$DOCKER_USER' DOCKER_TOKEN='$DOCKER_TOKEN' REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' IMAGE_TAG='$IMAGE_TAG' bash -s" <<'EOF'
+  jenkins@"$TARGET_IP" "DOCKER_USER='$DOCKER_USER' DOCKER_TOKEN='$DOCKER_TOKEN' IMAGE_TAG='$IMAGE_TAG' BUILD_TAG='$BUILD_TAG' DOCKER_HUB_REGISTRY='$DOCKER_HUB_REGISTRY' REMOTE_DIR='$REMOTE_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'EOFDOCKERHUB'
 set -euo pipefail
+
+echo "🔐 Autenticando en Docker Hub..."
+echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin || {
+  echo "❌ Error autenticando en Docker Hub"
+  exit 1
+}
 
 cd "$REMOTE_DIR"
 
@@ -753,37 +769,62 @@ if [ ! -f "$DOCKERFILE_PATH" ]; then
   exit 1
 fi
 
-echo "🔐 Logging in to Docker Hub..."
-echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "� Construyendo imagen para Docker Hub: $SERVICE_NAME"
+echo "Registry: $DOCKER_HUB_REGISTRY"
+echo "Tags: $IMAGE_TAG, $BUILD_TAG, latest"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-echo "🏷️ Building image with metadata..."
-docker build -t "$DOCKER_USER/$SERVICE_NAME:$IMAGE_TAG" "$REMOTE_DIR" \
+# Construir imagen con metadata adicional
+docker build -t "${DOCKER_HUB_REGISTRY}:${IMAGE_TAG}" "$REMOTE_DIR" \
   -f "$DOCKERFILE_PATH" \
   --build-arg SERVICE_NAME="$SERVICE_NAME" \
   --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
-  --build-arg VCS_REF="$IMAGE_TAG" \
-  --build-arg VERSION="$IMAGE_TAG" \
-  || { echo "❌ Error building $SERVICE_NAME"; exit 1; }
+  --build-arg VCS_REF="$(git -C $REMOTE_DIR rev-parse --short HEAD 2>/dev/null || echo 'unknown')" \
+  || {
+    echo "❌ Error construyendo imagen para Docker Hub"
+    exit 1
+  }
 
-echo "📤 Pushing to Docker Hub..."
-docker push "$DOCKER_USER/$SERVICE_NAME:$IMAGE_TAG"
+echo "📤 Subiendo imagen a Docker Hub..."
 
-# Tag and push additional tags
-docker tag "$DOCKER_USER/$SERVICE_NAME:$IMAGE_TAG" "$DOCKER_USER/$SERVICE_NAME:latest"
-docker push "$DOCKER_USER/$SERVICE_NAME:latest"
+# Push con tag del commit/versión
+docker push "${DOCKER_HUB_REGISTRY}:${IMAGE_TAG}" || {
+  echo "❌ Error subiendo imagen con tag ${IMAGE_TAG}"
+  exit 1
+}
 
-if [ -n "${BUILD_NUMBER:-}" ]; then
-  docker tag "$DOCKER_USER/$SERVICE_NAME:$IMAGE_TAG" "$DOCKER_USER/$SERVICE_NAME:build-${BUILD_NUMBER}"
-  docker push "$DOCKER_USER/$SERVICE_NAME:build-${BUILD_NUMBER}"
-fi
+# Tag y push con build number para trazabilidad
+docker tag "${DOCKER_HUB_REGISTRY}:${IMAGE_TAG}" "${DOCKER_HUB_REGISTRY}:${BUILD_TAG}"
+docker push "${DOCKER_HUB_REGISTRY}:${BUILD_TAG}" || {
+  echo "⚠️  Advertencia: Error subiendo tag de build"
+}
 
-echo "🧹 Logging out from Docker Hub..."
-docker logout
+# Tag y push como 'latest' para facilitar uso en stage
+docker tag "${DOCKER_HUB_REGISTRY}:${IMAGE_TAG}" "${DOCKER_HUB_REGISTRY}:latest"
+docker push "${DOCKER_HUB_REGISTRY}:latest" || {
+  echo "⚠️  Advertencia: Error subiendo tag latest"
+}
 
-echo "✅ Image pushed successfully to Docker Hub"
-EOF
+echo "✅ Imagen guardada en Docker Hub exitosamente"
+echo "📍 Disponible en: ${DOCKER_HUB_REGISTRY}:${IMAGE_TAG}"
+echo "📍 También como: ${DOCKER_HUB_REGISTRY}:${BUILD_TAG}"
+echo "📍 Y como: ${DOCKER_HUB_REGISTRY}:latest"
+
+# Logout de Docker Hub
+docker logout || true
+EOFDOCKERHUB
 '''
             }
+            
+            // Guardar información de la imagen para stage
+            env.DOCKER_HUB_IMAGE = "${dockerHubRegistry}:${imageTag}"
+            env.DOCKER_HUB_IMAGE_TAG = imageTag
+            env.DOCKER_HUB_BUILD_TAG = buildTag
+            
+            echo "✅ Imagen lista para usar en Stage:"
+            echo "   docker pull ${dockerHubRegistry}:${imageTag}"
           }
         }
       }
