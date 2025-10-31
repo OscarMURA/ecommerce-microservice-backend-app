@@ -130,12 +130,16 @@ pipeline {
         withCredentials([string(credentialsId: 'digitalocean-token', variable: 'DO_TOKEN')]) {
           script {
             def fetchIp = { vmName ->
-              sh(script: """
+              def result = ''
+              withEnv(["VMNAME=${vmName}"]) {
+                result = sh(script: '''
 set -e
 curl -sS -H "Authorization: Bearer ${DO_TOKEN}" "https://api.digitalocean.com/v2/droplets?per_page=200" \
-  | jq -r --arg NAME \"${vmName}\" '.droplets[] | select(.name==\$NAME) | .networks.v4[] | select(.type==\"public\") | .ip_address' \
+  | jq -r --arg NAME "$VMNAME" '.droplets[] | select(.name==$NAME) | .networks.v4[] | select(.type=="public") | .ip_address' \
   | head -n1
-""", returnStdout: true).trim()
+''', returnStdout: true).trim()
+              }
+              return result
             }
             def buildIp = fetchIp(params.VM_NAME)
             def minikubeIp = fetchIp(params.MINIKUBE_VM_NAME)
@@ -856,7 +860,7 @@ jenkins/scripts/deploy-single-service-to-gke.sh
         withCredentials([ string(credentialsId: 'integration-vm-password', variable: 'VM_PASSWORD') ]) {
           script {
             withEnv([
-              "TARGET_IP=${env.DROPLET_IP}",
+              "TARGET_IP=${env.MINIKUBE_VM_IP}",
               "NAMESPACE=ecommerce"
             ]) {
               sh '''

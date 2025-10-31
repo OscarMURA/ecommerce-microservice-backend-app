@@ -410,7 +410,12 @@ PY
 }
 
 echo "➡️ Ejecutando pruebas unitarias para $SERVICE_NAME"
-./mvnw -B -pl "$SERVICE_NAME" test -Dtest='*ServiceImplTest' -DfailIfNoTests=false
+# Limitar memoria de Maven y JVM para evitar OOM
+export MAVEN_OPTS="-Xmx512m -XX:MaxMetaspaceSize=256m"
+./mvnw -B -pl "$SERVICE_NAME" test \
+  -Dtest='*ServiceImplTest' \
+  -DfailIfNoTests=false \
+  -Dsurefire.argLine="-Xmx512m -XX:MaxMetaspaceSize=256m"
 summarize_reports "$SERVICE_NAME"
 EOF
 ''')
@@ -482,7 +487,14 @@ PY
 }
 
 echo "➡️ Ejecutando pruebas de integración para $SERVICE_NAME"
-./mvnw -B -pl "$SERVICE_NAME" test -Dtest='*IntegrationTest' -DfailIfNoTests=false
+# Limitar memoria de Maven y JVM para evitar OOM
+export MAVEN_OPTS="-Xmx512m -XX:MaxMetaspaceSize=256m"
+# Ejecutar tests con límites de memoria y secuencialmente
+./mvnw -B -pl "$SERVICE_NAME" test \
+  -Dtest='*IntegrationTest' \
+  -DfailIfNoTests=false \
+  -Dsurefire.argLine="-Xmx768m -XX:MaxMetaspaceSize=384m" \
+  -T 1
 summarize_reports "$SERVICE_NAME"
 EOF
 ''')

@@ -3,7 +3,8 @@ pipeline {
   options { timestamps(); disableConcurrentBuilds() }
 
   parameters {
-    string(name: 'VM_NAME', defaultValue: 'ecommerce-integration-runner', description: 'Nombre de la VM creada por Jenkins_Create_VM')
+    string(name: 'VM_NAME', defaultValue: 'ecommerce-integration-runner', description: 'Nombre de la VM de BUILD/TEST (runner)')
+    string(name: 'MINIKUBE_VM_NAME', defaultValue: 'ecommerce-minikube-dev', description: 'Nombre de la VM que tiene Minikube')
     string(name: 'VM_REGION', defaultValue: 'nyc3', description: 'Región del droplet (usado si hay que crearlo)')
     string(name: 'VM_SIZE', defaultValue: 's-1vcpu-2gb', description: 'Tamaño del droplet (usado si hay que crearlo)')
     string(name: 'VM_IMAGE', defaultValue: 'ubuntu-22-04-x64', description: 'Imagen del droplet (usado si hay que crearlo)')
@@ -170,12 +171,16 @@ pipeline {
         withCredentials([string(credentialsId: 'digitalocean-token', variable: 'DO_TOKEN')]) {
           script {
             def fetchIp = { vmName ->
-              sh(script: """
+              def result = ''
+              withEnv(["VMNAME=${vmName}"]) {
+                result = sh(script: '''
 set -e
 curl -sS -H "Authorization: Bearer ${DO_TOKEN}" "https://api.digitalocean.com/v2/droplets?per_page=200" \
-  | jq -r --arg NAME \"${vmName}\" '.droplets[] | select(.name==\$NAME) | .networks.v4[] | select(.type==\"public\") | .ip_address' \
+  | jq -r --arg NAME "$VMNAME" '.droplets[] | select(.name==$NAME) | .networks.v4[] | select(.type=="public") | .ip_address' \
   | head -n1
-""", returnStdout: true).trim()
+''', returnStdout: true).trim()
+              }
+              return result
             }
 
             def buildIp = fetchIp(params.VM_NAME)
@@ -939,7 +944,7 @@ jenkins/scripts/deploy-single-service-to-gke.sh
         ]) {
           script {
             withEnv([
-              "TARGET_IP=${env.DROPLET_IP}",
+              "TARGET_IP=${env.MINIKUBE_VM_IP}",
               "NAMESPACE=ecommerce"
             ]) {
               sh '''
