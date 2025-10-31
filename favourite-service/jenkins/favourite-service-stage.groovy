@@ -146,7 +146,7 @@ fi
 echo "✅ gcloud encontrado en: $GCLOUD_PATH"
 
 # Verify kubectl is available
-if ! command -v kubectl &> /dev/null; then
+if ! command -v kubectl > /dev/null 2>&1; then
   echo "❌ Error: kubectl no encontrado"
   exit 1
 fi
@@ -295,13 +295,13 @@ set -e
 export PATH="/usr/local/bin:/usr/bin:/bin:/opt/google-cloud-sdk/google-cloud-sdk/bin:/opt/google-cloud-sdk/bin:$PATH"
 
 # Verify gcloud is available
-if ! command -v gcloud &> /dev/null; then
+if ! command -v gcloud > /dev/null 2>&1; then
   echo "❌ Error: gcloud no encontrado"
   exit 1
 fi
 
 # Verify kubectl is available
-if ! command -v kubectl &> /dev/null; then
+if ! command -v kubectl > /dev/null 2>&1; then
   echo "❌ Error: kubectl no encontrado"
   exit 1
 fi
