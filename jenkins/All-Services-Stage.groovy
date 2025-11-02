@@ -45,15 +45,6 @@ pipeline {
         checkout scm
         script { 
           echo "📁 Workspace: ${env.WORKSPACE}" 
-          // Definir servicios con sus configuraciones
-          env.SERVICES_CONFIG = """
-user-service:8085
-product-service:8083
-order-service:8081
-shipping-service:8084
-payment-service:8082
-favourite-service:8086
-"""
         }
       }
     }
@@ -61,14 +52,31 @@ favourite-service:8086
     stage('Detect Service Changes') {
       steps {
         script {
-          def services = [
-            'user-service': [port: '8085', deploy: params.DEPLOY_USER_SERVICE, changed: false],
-            'product-service': [port: '8083', deploy: params.DEPLOY_PRODUCT_SERVICE, changed: false],
-            'order-service': [port: '8081', deploy: params.DEPLOY_ORDER_SERVICE, changed: false],
-            'shipping-service': [port: '8084', deploy: params.DEPLOY_SHIPPING_SERVICE, changed: false],
-            'payment-service': [port: '8082', deploy: params.DEPLOY_PAYMENT_SERVICE, changed: false],
-            'favourite-service': [port: '8086', deploy: params.DEPLOY_FAVOURITE_SERVICE, changed: false]
+          // Mapa de servicios con sus puertos
+          def servicesData = [
+            'user-service': '8085',
+            'product-service': '8083',
+            'order-service': '8081',
+            'shipping-service': '8084',
+            'payment-service': '8082',
+            'favourite-service': '8086'
           ]
+
+          // Configuración de qué servicios desplegar
+          def deployFlags = [
+            'user-service': params.DEPLOY_USER_SERVICE,
+            'product-service': params.DEPLOY_PRODUCT_SERVICE,
+            'order-service': params.DEPLOY_ORDER_SERVICE,
+            'shipping-service': params.DEPLOY_SHIPPING_SERVICE,
+            'payment-service': params.DEPLOY_PAYMENT_SERVICE,
+            'favourite-service': params.DEPLOY_FAVOURITE_SERVICE
+          ]
+
+          // Rastrear qué servicios cambiaron
+          def servicesChanged = [:]
+          servicesData.each { name, port ->
+            servicesChanged[name] = false
+          }
 
           def changedFiles = []
 
@@ -107,12 +115,12 @@ favourite-service:8086
           }
 
           // Detectar cambios en cada servicio
-          services.each { serviceName, config ->
+          servicesData.each { serviceName, port ->
             def serviceDir = "${serviceName}/"
             def hasServiceChanges = changedFiles.any { file -> file.startsWith(serviceDir) }
             
             if (hasServiceChanges) {
-              services[serviceName].changed = true
+              servicesChanged[serviceName] = true
               echo "✅ Cambios detectados en ${serviceName}"
             }
           }
@@ -124,17 +132,17 @@ favourite-service:8086
 
           if (hasSharedChanges) {
             echo "⚠️ Cambios detectados en archivos compartidos - todos los servicios seleccionados se desplegarán"
-            services.each { serviceName, config ->
-              if (config.deploy) {
-                services[serviceName].changed = true
+            deployFlags.each { serviceName, flag ->
+              if (flag) {
+                servicesChanged[serviceName] = true
               }
             }
           }
 
           // Determinar qué servicios se van a desplegar
           def servicesToDeploy = []
-          services.each { serviceName, config ->
-            if (config.deploy && (config.changed || params.FORCE_DEPLOY_ALL)) {
+          servicesData.each { serviceName, port ->
+            if (deployFlags[serviceName] && (servicesChanged[serviceName] || params.FORCE_DEPLOY_ALL)) {
               servicesToDeploy << serviceName
             }
           }
@@ -151,9 +159,6 @@ favourite-service:8086
 
           env.SERVICES_TO_DEPLOY = servicesToDeploy.join(',')
           echo "🚀 Servicios a desplegar: ${env.SERVICES_TO_DEPLOY}"
-          
-          // Guardar configuración para etapas posteriores
-          env.SERVICES_JSON = groovy.json.JsonOutput.toJson(services)
         }
       }
     }
@@ -171,7 +176,16 @@ favourite-service:8086
           script {
             def imageTag = params.DOCKER_IMAGE_TAG?.trim() ?: 'latest'
             def servicesToDeploy = env.SERVICES_TO_DEPLOY.split(',')
-            def services = new groovy.json.JsonSlurper().parseText(env.SERVICES_JSON)
+
+            // Mapa de puertos por servicio
+            def servicePorts = [
+              'user-service': '8085',
+              'product-service': '8083',
+              'order-service': '8081',
+              'shipping-service': '8084',
+              'payment-service': '8082',
+              'favourite-service': '8086'
+            ]
             
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "🚀 Iniciando despliegue masivo a GKE Staging"
@@ -183,7 +197,7 @@ favourite-service:8086
 
             // Desplegar cada servicio
             servicesToDeploy.each { serviceName ->
-              def servicePort = services[serviceName].port
+              def servicePort = servicePorts[serviceName]
               def dockerHubImage = "${DOCKER_USER}/${serviceName}:${imageTag}"
               
               echo ""
@@ -283,7 +297,7 @@ spec:
             memory: 1Gi
         livenessProbe:
           httpGet:
-            path: /actuator/health
+            path: /${SERVICE_NAME}/actuator/health
             port: ${SERVICE_PORT}
           initialDelaySeconds: 60
           periodSeconds: 10
@@ -291,7 +305,7 @@ spec:
           failureThreshold: 3
         readinessProbe:
           httpGet:
-            path: /actuator/health
+            path: /${SERVICE_NAME}/actuator/health
             port: ${SERVICE_PORT}
           initialDelaySeconds: 30
           periodSeconds: 5
@@ -355,7 +369,16 @@ kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE}
         ]) {
           script {
             def servicesToDeploy = env.SERVICES_TO_DEPLOY.split(',')
-            def services = new groovy.json.JsonSlurper().parseText(env.SERVICES_JSON)
+
+            // Mapa de puertos por servicio
+            def servicePorts = [
+              'user-service': '8085',
+              'product-service': '8083',
+              'order-service': '8081',
+              'shipping-service': '8084',
+              'payment-service': '8082',
+              'favourite-service': '8086'
+            ]
             
             echo ""
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -365,7 +388,7 @@ kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE}
             def healthResults = [:]
             
             servicesToDeploy.each { serviceName ->
-              def servicePort = services[serviceName].port
+              def servicePort = servicePorts[serviceName]
               
               echo ""
               echo "🏥 Verificando ${serviceName}..."
@@ -410,7 +433,7 @@ HEALTH_STATUS=""
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
   HEALTH_RESPONSE=$(kubectl exec -n "${K8S_NAMESPACE}" deployment/"${SERVICE_NAME}" -- \
-    curl -s http://localhost:"${SERVICE_PORT}"/actuator/health 2>/dev/null || echo "ERROR")
+    curl -s http://localhost:"${SERVICE_PORT}"/${SERVICE_NAME}/actuator/health 2>/dev/null || echo "ERROR")
   
   if echo "$HEALTH_RESPONSE" | grep -q '"status":"UP"' || echo "$HEALTH_RESPONSE" | grep -q '"status" : "UP"'; then
     HEALTH_STATUS="UP"
@@ -549,4 +572,3 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
     }
   }
 }
-

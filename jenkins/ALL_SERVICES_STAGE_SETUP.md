@@ -378,5 +378,5 @@ Para problemas o preguntas:
 
 **Última actualización:** 2025-11-02
 **Versión del Pipeline:** 1.0
-**Autor:** Sistema de DevOps
+**Autor:** Oscar Muñoz Ramirez
 
