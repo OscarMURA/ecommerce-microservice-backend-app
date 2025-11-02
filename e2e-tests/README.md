@@ -161,6 +161,44 @@ assertNotNull(response.getBody());
 3. **Datos no encontrados**: Verificar orden de ejecución con `@Order`
 4. **Errores de serialización**: Verificar DTOs y Jackson configuration
 
+### **Error: "Could not find the selected project in the reactor: e2e-tests"**
+
+**Síntoma**: 
+```bash
+[ERROR] Could not find the selected project in the reactor: e2e-tests
+```
+
+**Causa**: 
+Este error ocurre cuando se intenta ejecutar las pruebas E2E desde la raíz del proyecto usando `-pl e2e-tests` después de hacer cambios como `git reset --hard` o cuando Maven no ha procesado correctamente la estructura multi-módulo.
+
+**Solución**:
+
+**Opción 1: Validar el proyecto padre primero (Recomendado)**
+```bash
+# Desde la raíz del proyecto
+cd /home/oscar/Documents/Taller\ 2\ Ingesoft/ecommerce-microservice-backend-app
+./mvnw validate -N
+# Luego ejecutar las pruebas
+./mvnw -pl e2e-tests clean test -Dtest=*E2E*Test
+```
+
+**Opción 2: Ejecutar desde dentro del módulo (Más simple)**
+```bash
+# Entrar al directorio e2e-tests
+cd e2e-tests
+./mvnw clean test -Dtest=*E2E*Test
+```
+
+**Opción 3: Instalar el proyecto padre completo**
+```bash
+# Desde la raíz, instalar el proyecto padre
+./mvnw install -N
+# Luego ejecutar las pruebas
+./mvnw -pl e2e-tests test -Dtest=*E2E*Test
+```
+
+**Nota**: La opción 2 es la más recomendada para ejecuciones locales rápidas. Las opciones 1 y 3 son útiles para CI/CD o cuando necesitas ejecutar múltiples módulos.
+
 ### **Logs de Debug**
 ```properties
 logging.level.com.selimhorri.app=DEBUG
