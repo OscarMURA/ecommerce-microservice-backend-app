@@ -1,0 +1,552 @@
+pipeline {
+  agent any
+  options { timestamps(); disableConcurrentBuilds() }
+
+  parameters {
+    string(name: 'DOCKER_IMAGE_TAG', defaultValue: 'latest', description: 'Tag de la imagen en Docker Hub a desplegar')
+    string(name: 'GKE_CLUSTER_NAME', defaultValue: 'ecommerce-dev-gke-v2', description: 'Nombre del cluster GKE')
+    string(name: 'GKE_LOCATION', defaultValue: 'us-central1-a', description: 'Zona o región del cluster GKE')
+    string(name: 'K8S_NAMESPACE', defaultValue: 'staging', description: 'Namespace de Kubernetes donde se desplegará')
+    string(name: 'REPLICA_COUNT', defaultValue: '1', description: 'Número de réplicas por servicio')
+    booleanParam(name: 'DEPLOY_USER_SERVICE', defaultValue: true, description: 'Desplegar user-service')
+    booleanParam(name: 'DEPLOY_PRODUCT_SERVICE', defaultValue: true, description: 'Desplegar product-service')
+    booleanParam(name: 'DEPLOY_ORDER_SERVICE', defaultValue: true, description: 'Desplegar order-service')
+    booleanParam(name: 'DEPLOY_SHIPPING_SERVICE', defaultValue: true, description: 'Desplegar shipping-service')
+    booleanParam(name: 'DEPLOY_PAYMENT_SERVICE', defaultValue: true, description: 'Desplegar payment-service')
+    booleanParam(name: 'DEPLOY_FAVOURITE_SERVICE', defaultValue: true, description: 'Desplegar favourite-service')
+    booleanParam(name: 'FORCE_DEPLOY_ALL', defaultValue: false, description: 'Forzar despliegue de todos los servicios seleccionados')
+  }
+
+  environment {
+    GITHUB_TOKEN = credentials('github-token')
+  }
+
+  stages {
+
+    stage('Validate Branch') {
+      steps {
+        script {
+          def branch = (env.BRANCH_NAME ?: env.GIT_BRANCH ?: '').replaceFirst('^origin/', '')
+          if (!branch) {
+            echo "Rama no disponible (posible indexado). Se omite validación."
+            return
+          }
+          if (branch != 'staging') {
+            error "All-Services-Stage solo se ejecuta en rama staging (rama actual: '${branch}')."
+          }
+          echo "✅ Branch validada: ${branch}"
+          env.PIPELINE_BRANCH = branch
+        }
+      }
+    }
+
+    stage('Checkout') {
+      steps {
+        checkout scm
+        script { 
+          echo "📁 Workspace: ${env.WORKSPACE}" 
+          // Definir servicios con sus configuraciones
+          env.SERVICES_CONFIG = """
+user-service:8085
+product-service:8083
+order-service:8081
+shipping-service:8084
+payment-service:8082
+favourite-service:8086
+"""
+        }
+      }
+    }
+
+    stage('Detect Service Changes') {
+      steps {
+        script {
+          def services = [
+            'user-service': [port: '8085', deploy: params.DEPLOY_USER_SERVICE, changed: false],
+            'product-service': [port: '8083', deploy: params.DEPLOY_PRODUCT_SERVICE, changed: false],
+            'order-service': [port: '8081', deploy: params.DEPLOY_ORDER_SERVICE, changed: false],
+            'shipping-service': [port: '8084', deploy: params.DEPLOY_SHIPPING_SERVICE, changed: false],
+            'payment-service': [port: '8082', deploy: params.DEPLOY_PAYMENT_SERVICE, changed: false],
+            'favourite-service': [port: '8086', deploy: params.DEPLOY_FAVOURITE_SERVICE, changed: false]
+          ]
+
+          def changedFiles = []
+
+          echo "🔍 Detectando cambios en servicios..."
+
+          try {
+            if (env.GIT_PREVIOUS_SUCCESSFUL_COMMIT && env.GIT_PREVIOUS_SUCCESSFUL_COMMIT != env.GIT_COMMIT) {
+              changedFiles = sh(
+                script: "git diff --name-only ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT} ${env.GIT_COMMIT}",
+                returnStdout: true
+              ).trim().split('\n').findAll { it?.trim() }
+            } else {
+              def commitCount = sh(
+                script: "git rev-list --count HEAD",
+                returnStdout: true
+              ).trim().toInteger()
+
+              if (commitCount > 1) {
+                changedFiles = sh(
+                  script: "git diff --name-only HEAD~1 HEAD",
+                  returnStdout: true
+                ).trim().split('\n').findAll { it?.trim() }
+              } else {
+                changedFiles = sh(
+                  script: "git ls-tree -r --name-only HEAD",
+                  returnStdout: true
+                ).trim().split('\n').findAll { it?.trim() }
+              }
+            }
+          } catch (Exception e) {
+            echo "⚠️ No se pudo comparar con commit anterior: ${e.message}"
+            changedFiles = sh(
+              script: "git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null || git ls-tree -r --name-only HEAD",
+              returnStdout: true
+            ).trim().split('\n').findAll { it?.trim() }
+          }
+
+          // Detectar cambios en cada servicio
+          services.each { serviceName, config ->
+            def serviceDir = "${serviceName}/"
+            def hasServiceChanges = changedFiles.any { file -> file.startsWith(serviceDir) }
+            
+            if (hasServiceChanges) {
+              services[serviceName].changed = true
+              echo "✅ Cambios detectados en ${serviceName}"
+            }
+          }
+
+          // Detectar cambios compartidos que afectan a todos
+          def hasSharedChanges = changedFiles.any { file ->
+            file == 'pom.xml' || file.startsWith('jenkins/') || file.startsWith('.github/')
+          }
+
+          if (hasSharedChanges) {
+            echo "⚠️ Cambios detectados en archivos compartidos - todos los servicios seleccionados se desplegarán"
+            services.each { serviceName, config ->
+              if (config.deploy) {
+                services[serviceName].changed = true
+              }
+            }
+          }
+
+          // Determinar qué servicios se van a desplegar
+          def servicesToDeploy = []
+          services.each { serviceName, config ->
+            if (config.deploy && (config.changed || params.FORCE_DEPLOY_ALL)) {
+              servicesToDeploy << serviceName
+            }
+          }
+
+          if (servicesToDeploy.isEmpty()) {
+            echo "ℹ️ No hay servicios para desplegar"
+            echo "✅ Pipeline se omite porque no hay cambios relevantes en los servicios seleccionados"
+            currentBuild.result = 'SUCCESS'
+            catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
+              error("Pipeline omitido exitosamente - no hay servicios para desplegar")
+            }
+            return
+          }
+
+          env.SERVICES_TO_DEPLOY = servicesToDeploy.join(',')
+          echo "🚀 Servicios a desplegar: ${env.SERVICES_TO_DEPLOY}"
+          
+          // Guardar configuración para etapas posteriores
+          env.SERVICES_JSON = groovy.json.JsonOutput.toJson(services)
+        }
+      }
+    }
+
+    stage('Deploy Services to GKE Staging') {
+      when {
+        expression { env.SERVICES_TO_DEPLOY != null && env.SERVICES_TO_DEPLOY != '' }
+      }
+      steps {
+        withCredentials([
+          string(credentialsId: 'gcp-project-id', variable: 'GCP_PROJECT_ID'),
+          file(credentialsId: 'gcp-service-account', variable: 'GOOGLE_APPLICATION_CREDENTIALS'),
+          string(credentialsId: 'docker-user', variable: 'DOCKER_USER')
+        ]) {
+          script {
+            def imageTag = params.DOCKER_IMAGE_TAG?.trim() ?: 'latest'
+            def servicesToDeploy = env.SERVICES_TO_DEPLOY.split(',')
+            def services = new groovy.json.JsonSlurper().parseText(env.SERVICES_JSON)
+            
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🚀 Iniciando despliegue masivo a GKE Staging"
+            echo "📦 Imagen tag: ${imageTag}"
+            echo "🏷️  Namespace: ${params.K8S_NAMESPACE}"
+            echo "🔢 Réplicas: ${params.REPLICA_COUNT}"
+            echo "📋 Servicios: ${servicesToDeploy.join(', ')}"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+            // Desplegar cada servicio
+            servicesToDeploy.each { serviceName ->
+              def servicePort = services[serviceName].port
+              def dockerHubImage = "${DOCKER_USER}/${serviceName}:${imageTag}"
+              
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "🚀 Desplegando ${serviceName}"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+              withEnv([
+                "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
+                "GKE_CLUSTER_NAME=${params.GKE_CLUSTER_NAME}",
+                "GKE_LOCATION=${params.GKE_LOCATION}",
+                "K8S_NAMESPACE=${params.K8S_NAMESPACE}",
+                "SERVICE_NAME=${serviceName}",
+                "SERVICE_PORT=${servicePort}",
+                "DOCKER_HUB_IMAGE=${dockerHubImage}",
+                "REPLICA_COUNT=${params.REPLICA_COUNT}",
+                "GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}"
+              ]) {
+                sh '''
+set -e
+
+# Configure PATH for gcloud and kubectl
+export PATH="/usr/local/bin:/usr/bin:/bin:/opt/google-cloud-sdk/google-cloud-sdk/bin:/opt/google-cloud-sdk/bin:$PATH"
+
+# Find and set gcloud path
+GCLOUD_PATH=$(which gcloud 2>/dev/null || find /usr -name gcloud 2>/dev/null | head -1 || find /opt -name gcloud 2>/dev/null | head -1 || echo "")
+if [ -z "$GCLOUD_PATH" ]; then
+  echo "❌ Error: gcloud no encontrado. Instálalo con:"
+  echo "   sudo apt-get update && sudo apt-get install -y google-cloud-sdk google-cloud-sdk-gke-gcloud-auth-plugin"
+  exit 1
+fi
+echo "✅ gcloud encontrado en: $GCLOUD_PATH"
+
+# Verify kubectl is available
+if ! command -v kubectl > /dev/null 2>&1; then
+  echo "❌ Error: kubectl no encontrado"
+  exit 1
+fi
+echo "✅ kubectl encontrado"
+
+echo "🔐 Autenticando con Google Cloud..."
+gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}"
+gcloud config set project "${GCP_PROJECT_ID}"
+
+echo "☸️ Configurando kubectl para GKE..."
+gcloud container clusters get-credentials "${GKE_CLUSTER_NAME}" \
+  --zone "${GKE_LOCATION}" \
+  --project "${GCP_PROJECT_ID}"
+
+echo "📦 Creando namespace si no existe..."
+kubectl create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+
+echo "🚀 Desplegando ${SERVICE_NAME} en namespace ${K8S_NAMESPACE}..."
+
+kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${SERVICE_NAME}
+  namespace: ${K8S_NAMESPACE}
+  labels:
+    app: ${SERVICE_NAME}
+    environment: staging
+    deployed-by: all-services-pipeline
+spec:
+  replicas: ${REPLICA_COUNT}
+  selector:
+    matchLabels:
+      app: ${SERVICE_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${SERVICE_NAME}
+        environment: staging
+    spec:
+      containers:
+      - name: ${SERVICE_NAME}
+        image: ${DOCKER_HUB_IMAGE}
+        imagePullPolicy: Always
+        ports:
+        - containerPort: ${SERVICE_PORT}
+        env:
+        - name: SERVER_PORT
+          value: "${SERVICE_PORT}"
+        - name: SPRING_PROFILES_ACTIVE
+          value: "staging"
+        - name: SPRING_CLOUD_CONFIG_ENABLED
+          value: "false"
+        - name: EUREKA_CLIENT_ENABLED
+          value: "false"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: ${SERVICE_PORT}
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: ${SERVICE_PORT}
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${SERVICE_NAME}
+  namespace: ${K8S_NAMESPACE}
+  labels:
+    app: ${SERVICE_NAME}
+    environment: staging
+spec:
+  type: ClusterIP
+  selector:
+    app: ${SERVICE_NAME}
+  ports:
+  - port: ${SERVICE_PORT}
+    targetPort: ${SERVICE_PORT}
+    protocol: TCP
+    name: http
+EOF
+
+echo "⏳ Esperando que el deployment esté listo..."
+kubectl wait --for=condition=available --timeout=300s \
+  deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} || {
+  echo "❌ Timeout esperando deployment. Verificando estado..."
+  kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
+  kubectl describe deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
+  exit 1
+}
+
+echo "✅ ${SERVICE_NAME} desplegado exitosamente en staging"
+echo ""
+echo "📊 Estado del deployment:"
+kubectl get deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
+echo ""
+echo "📦 Pods:"
+kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
+echo ""
+echo "🌐 Service:"
+kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE}
+'''
+              }
+            }
+          }
+        }
+      }
+    }
+
+    stage('Health Check All Services') {
+      when {
+        expression { env.SERVICES_TO_DEPLOY != null && env.SERVICES_TO_DEPLOY != '' }
+      }
+      steps {
+        withCredentials([
+          file(credentialsId: 'gcp-service-account', variable: 'GOOGLE_APPLICATION_CREDENTIALS'),
+          string(credentialsId: 'gcp-project-id', variable: 'GCP_PROJECT_ID')
+        ]) {
+          script {
+            def servicesToDeploy = env.SERVICES_TO_DEPLOY.split(',')
+            def services = new groovy.json.JsonSlurper().parseText(env.SERVICES_JSON)
+            
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🏥 Verificando salud de todos los servicios"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            
+            def healthResults = [:]
+            
+            servicesToDeploy.each { serviceName ->
+              def servicePort = services[serviceName].port
+              
+              echo ""
+              echo "🏥 Verificando ${serviceName}..."
+              
+              withEnv([
+                "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
+                "GKE_CLUSTER_NAME=${params.GKE_CLUSTER_NAME}",
+                "GKE_LOCATION=${params.GKE_LOCATION}",
+                "K8S_NAMESPACE=${params.K8S_NAMESPACE}",
+                "SERVICE_NAME=${serviceName}",
+                "SERVICE_PORT=${servicePort}",
+                "GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}"
+              ]) {
+                try {
+                  sh '''
+set -e
+
+# Configure PATH for gcloud and kubectl
+export PATH="/usr/local/bin:/usr/bin:/bin:/opt/google-cloud-sdk/google-cloud-sdk/bin:/opt/google-cloud-sdk/bin:$PATH"
+
+# Verify gcloud is available
+if ! command -v gcloud > /dev/null 2>&1; then
+  echo "❌ Error: gcloud no encontrado"
+  exit 1
+fi
+
+# Verify kubectl is available
+if ! command -v kubectl > /dev/null 2>&1; then
+  echo "❌ Error: kubectl no encontrado"
+  exit 1
+fi
+
+gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}"
+gcloud container clusters get-credentials "${GKE_CLUSTER_NAME}" \
+  --zone "${GKE_LOCATION}" \
+  --project "${GCP_PROJECT_ID}"
+
+echo "🏥 Verificando health endpoint de ${SERVICE_NAME}..."
+MAX_RETRIES=12
+RETRY_COUNT=0
+HEALTH_STATUS=""
+
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+  HEALTH_RESPONSE=$(kubectl exec -n "${K8S_NAMESPACE}" deployment/"${SERVICE_NAME}" -- \
+    curl -s http://localhost:"${SERVICE_PORT}"/actuator/health 2>/dev/null || echo "ERROR")
+  
+  if echo "$HEALTH_RESPONSE" | grep -q '"status":"UP"' || echo "$HEALTH_RESPONSE" | grep -q '"status" : "UP"'; then
+    HEALTH_STATUS="UP"
+    echo "✅ ${SERVICE_NAME} está UP en staging"
+    echo "$HEALTH_RESPONSE"
+    break
+  else
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    echo "⚠️  Intento $RETRY_COUNT/$MAX_RETRIES - ${SERVICE_NAME} no está listo aún..."
+    if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+      sleep 10
+    fi
+  fi
+done
+
+if [ "$HEALTH_STATUS" != "UP" ]; then
+  echo "❌ Health check falló para ${SERVICE_NAME} después de $MAX_RETRIES intentos"
+  echo "📋 Logs del servicio:"
+  kubectl logs -n "${K8S_NAMESPACE}" deployment/"${SERVICE_NAME}" --tail=100
+  exit 1
+fi
+'''
+                  healthResults[serviceName] = 'SUCCESS'
+                  echo "✅ Health check exitoso para ${serviceName}"
+                } catch (Exception e) {
+                  healthResults[serviceName] = 'FAILED'
+                  echo "❌ Health check falló para ${serviceName}: ${e.message}"
+                  throw e
+                }
+              }
+            }
+            
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📊 RESUMEN DE HEALTH CHECKS:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            healthResults.each { service, status ->
+              def icon = status == 'SUCCESS' ? '✅' : '❌'
+              echo "${icon} ${service}: ${status}"
+            }
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          }
+        }
+      }
+    }
+
+    stage('Deployment Summary') {
+      when {
+        expression { env.SERVICES_TO_DEPLOY != null && env.SERVICES_TO_DEPLOY != '' }
+      }
+      steps {
+        withCredentials([
+          file(credentialsId: 'gcp-service-account', variable: 'GOOGLE_APPLICATION_CREDENTIALS'),
+          string(credentialsId: 'gcp-project-id', variable: 'GCP_PROJECT_ID')
+        ]) {
+          script {
+            withEnv([
+              "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
+              "GKE_CLUSTER_NAME=${params.GKE_CLUSTER_NAME}",
+              "GKE_LOCATION=${params.GKE_LOCATION}",
+              "K8S_NAMESPACE=${params.K8S_NAMESPACE}",
+              "GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}"
+            ]) {
+              sh '''
+set -e
+
+# Configure PATH for gcloud and kubectl
+export PATH="/usr/local/bin:/usr/bin:/bin:/opt/google-cloud-sdk/google-cloud-sdk/bin:/opt/google-cloud-sdk/bin:$PATH"
+
+gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}"
+gcloud container clusters get-credentials "${GKE_CLUSTER_NAME}" \
+  --zone "${GKE_LOCATION}" \
+  --project "${GCP_PROJECT_ID}"
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📊 RESUMEN FINAL DEL DESPLIEGUE"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "📦 Todos los Deployments en ${K8S_NAMESPACE}:"
+kubectl get deployments -n "${K8S_NAMESPACE}" -l deployed-by=all-services-pipeline
+echo ""
+echo "🌐 Todos los Services en ${K8S_NAMESPACE}:"
+kubectl get services -n "${K8S_NAMESPACE}" -l deployed-by=all-services-pipeline
+echo ""
+echo "📦 Todos los Pods en ${K8S_NAMESPACE}:"
+kubectl get pods -n "${K8S_NAMESPACE}" -l deployed-by=all-services-pipeline
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "✅ Despliegue masivo completado exitosamente"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+'''
+            }
+          }
+        }
+      }
+    }
+
+  }
+
+  post {
+    success {
+      echo "✅ All-Services-Stage completado exitosamente"
+      script {
+        try {
+          sh("""curl -X POST "https://api.github.com/repos/OscarMURA/ecommerce-microservice-backend-app/statuses/${env.GIT_COMMIT}" \\
+            -H "Authorization: token \${GITHUB_TOKEN}" \\
+            -H "Content-Type: application/json" \\
+            -d '{"state":"success","description":"Jenkins: All services staging deployment passed","context":"ci/jenkins/all-services-stage"}'""")
+        } catch (Exception e) {
+          echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
+        }
+      }
+    }
+    failure {
+      echo "❌ All-Services-Stage falló"
+      script {
+        try {
+          sh("""curl -X POST "https://api.github.com/repos/OscarMURA/ecommerce-microservice-backend-app/statuses/${env.GIT_COMMIT}" \\
+            -H "Authorization: token \${GITHUB_TOKEN}" \\
+            -H "Content-Type: application/json" \\
+            -d '{"state":"failure","description":"Jenkins: All services staging deployment failed","context":"ci/jenkins/all-services-stage"}'""")
+        } catch (Exception e) {
+          echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
+        }
+      }
+    }
+    always {
+      script {
+        if (env.SERVICES_TO_DEPLOY) {
+          echo ""
+          echo "📋 Servicios procesados: ${env.SERVICES_TO_DEPLOY}"
+        }
+      }
+      cleanWs()
+    }
+  }
+}
+
