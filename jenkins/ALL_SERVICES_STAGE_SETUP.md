@@ -9,7 +9,7 @@ All-Services-Stage-Pipeline
 
 ### Descripción
 ```
-Pipeline automatizado para desplegar múltiples microservicios (user, product, order, shipping, payment, favourite) al ambiente de staging en GKE. Detecta cambios automáticamente en cada servicio y despliega solo los que han sido modificados, o permite forzar el despliegue de servicios específicos mediante parámetros. Incluye health checks automáticos para cada servicio desplegado.
+Pipeline automatizado para desplegar múltiples microservicios (service-discovery, user, product, order, shipping, payment, favourite) al ambiente de staging en GKE. Detecta cambios automáticamente en cada servicio y despliega solo los que han sido modificados, o permite forzar el despliegue de servicios específicos mediante parámetros. Incluye health checks automáticos y pruebas E2E para cada servicio desplegado. service-discovery se despliega primero.
 ```
 
 ### URL del Pipeline en Jenkins
@@ -80,6 +80,7 @@ El pipeline incluye los siguientes parámetros configurables:
 
 | Parámetro | Default | Descripción |
 |-----------|---------|-------------|
+| `DEPLOY_SERVICE_DISCOVERY` | `true` | Desplegar service-discovery (puerto 8761) - PRIMERO |
 | `DEPLOY_USER_SERVICE` | `true` | Desplegar user-service (puerto 8085) |
 | `DEPLOY_PRODUCT_SERVICE` | `true` | Desplegar product-service (puerto 8083) |
 | `DEPLOY_ORDER_SERVICE` | `true` | Desplegar order-service (puerto 8081) |
@@ -92,10 +93,11 @@ El pipeline incluye los siguientes parámetros configurables:
 
 ## 📦 Servicios Incluidos
 
-El pipeline maneja los siguientes microservicios:
+El pipeline maneja los siguientes microservicios (service-discovery se despliega primero):
 
 | Servicio | Puerto | Imagen Docker |
 |----------|--------|---------------|
+| service-discovery | 8761 | `${DOCKER_USER}/service-discovery:${TAG}` |
 | user-service | 8085 | `${DOCKER_USER}/user-service:${TAG}` |
 | product-service | 8083 | `${DOCKER_USER}/product-service:${TAG}` |
 | order-service | 8081 | `${DOCKER_USER}/order-service:${TAG}` |
@@ -131,13 +133,20 @@ El pipeline maneja los siguientes microservicios:
 - ✅ Muestra logs en caso de fallo
 - ✅ Resumen consolidado de todos los health checks
 
-### 5. Resumen Final
+### 5. Pruebas E2E Automáticas
+- ✅ Ejecuta suite completa de pruebas E2E contra el cluster GKE
+- ✅ Configuración automática de port-forwards para los servicios
+- ✅ Validación de conectividad antes de ejecutar pruebas
+- ✅ Cobertura de 5 flujos completos de usuario
+- ✅ Servicios probados: user, product, order, payment, shipping, favourite
+
+### 6. Resumen Final
 - ✅ Muestra todos los deployments desplegados
 - ✅ Lista todos los services creados
 - ✅ Muestra estado de todos los pods
 - ✅ Etiquetas especiales (`deployed-by: all-services-pipeline`)
 
-### 6. Integración con GitHub
+### 7. Integración con GitHub
 - ✅ Actualiza el estado del commit en GitHub
 - ✅ Contexto: `ci/jenkins/all-services-stage`
 
@@ -236,17 +245,28 @@ Asegúrate de tener las siguientes credenciales configuradas en Jenkins:
 Usando el parámetro `FORCE_DEPLOY_ALL=true`:
 
 ```
-🚀 Servicios a desplegar: user-service,product-service,order-service,shipping-service,payment-service,favourite-service
+🚀 Servicios a desplegar: service-discovery,user-service,product-service,order-service,shipping-service,payment-service,favourite-service
 
-[Despliega todos los servicios seleccionados uno por uno]
+[Despliega todos los servicios seleccionados uno por uno - service-discovery PRIMERO]
 
 📊 RESUMEN DE HEALTH CHECKS:
+✅ service-discovery: SUCCESS
 ✅ user-service: SUCCESS
 ✅ product-service: SUCCESS
 ✅ order-service: SUCCESS
 ✅ shipping-service: SUCCESS
 ✅ payment-service: SUCCESS
 ✅ favourite-service: SUCCESS
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 Ejecutando pruebas E2E contra GKE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Configurando port-forwards para las pruebas...
+✅ Ejecutando suite de pruebas E2E...
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Todas las pruebas E2E pasaron exitosamente
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
 ---
@@ -289,6 +309,26 @@ Usando el parámetro `FORCE_DEPLOY_ALL=true`:
 1. Verifica recursos del cluster
 2. Revisa los logs del pod
 3. Verifica la imagen Docker
+
+### Pruebas E2E fallan
+
+**Causa:** Los servicios no responden a través de port-forward o las pruebas tienen errores
+
+**Solución:**
+1. Verifica que todos los port-forwards estén activos:
+   ```bash
+   ps aux | grep "kubectl port-forward"
+   ```
+2. Verifica conectividad local:
+   ```bash
+   curl http://localhost:8085/user-service/actuator/health
+   ```
+3. Revisa los logs de las pruebas E2E en el output del pipeline
+4. Ejecuta las pruebas localmente para debugging:
+   ```bash
+   cd e2e-tests
+   ./run-e2e-cluster.sh port-forward
+   ```
 
 ---
 
@@ -345,10 +385,55 @@ resources:
 
 ---
 
+## 🧪 Pruebas E2E Integradas
+
+### Descripción
+
+El pipeline incluye una etapa automática de pruebas E2E que valida el funcionamiento completo del sistema desplegado en GKE. Las pruebas simulan flujos reales de usuario a través de múltiples microservicios.
+
+### Cobertura de Pruebas
+
+1. **Complete User Registration and Profile Setup**
+   - Registro de usuario → Credenciales → Dirección → Perfil completo
+
+2. **Product Catalog Browsing and Category Management**
+   - Crear categoría → Crear productos → Navegar catálogo
+
+3. **Complete Order Creation and Management Flow**
+   - Crear orden → Agregar items → Procesar pago → Verificar estado
+
+4. **Favorites Management and User Preferences**
+   - Agregar favorito → Ver favoritos → Eliminar favorito
+
+5. **Complete E-commerce Transaction Flow**
+   - Autenticación → Navegación → Compra → Verificación → Limpieza
+
+### Configuración Automática
+
+- **Port-Forwards**: Configuración automática de `kubectl port-forward` para los 6 servicios
+- **Validación**: Verificación de conectividad antes de ejecutar pruebas
+- **Timeout**: Configuración de timeouts apropiados para pruebas en cluster
+- **Limpieza**: Limpieza automática de port-forwards al finalizar
+
+### Ejecución
+
+Las pruebas se ejecutan automáticamente después de:
+1. Health checks exitosos de todos los servicios
+2. Configuración de port-forwards
+3. Verificación de conectividad
+
+### Resultados
+
+- ✅ **Éxito**: Pipeline continúa al resumen final
+- ❌ **Fallo**: Pipeline termina con error, GitHub status se actualiza a "failure"
+
+---
+
 ## 📚 Referencias
 
 - Pipeline individual de servicios: `<service-name>/jenkins/<service-name>-stage.groovy`
 - Documentación de pipelines: `jenkins/README.md`
+- Documentación de E2E tests: `e2e-tests/README.md`
 - Documentación de GKE: [Google Kubernetes Engine](https://cloud.google.com/kubernetes-engine)
 
 ---
@@ -363,7 +448,9 @@ resources:
 - [ ] GitHub webhook configurado (opcional, para triggers automáticos)
 - [ ] Cluster GKE accesible desde Jenkins
 - [ ] `gcloud` y `kubectl` instalados en el agente Jenkins
+- [ ] Maven y Java instalados en el agente Jenkins (para E2E tests)
 - [ ] Probado con un despliegue manual
+- [ ] Verificado que las pruebas E2E se ejecuten correctamente
 
 ---
 
@@ -377,6 +464,6 @@ Para problemas o preguntas:
 ---
 
 **Última actualización:** 2025-11-02
-**Versión del Pipeline:** 1.0
+**Versión del Pipeline:** 2.0 (incluye pruebas E2E)
 **Autor:** Oscar Muñoz Ramirez
 

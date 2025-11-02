@@ -8,6 +8,7 @@ pipeline {
     string(name: 'GKE_LOCATION', defaultValue: 'us-central1-a', description: 'Zona o región del cluster GKE')
     string(name: 'K8S_NAMESPACE', defaultValue: 'staging', description: 'Namespace de Kubernetes donde se desplegará')
     string(name: 'REPLICA_COUNT', defaultValue: '1', description: 'Número de réplicas por servicio')
+    booleanParam(name: 'DEPLOY_SERVICE_DISCOVERY', defaultValue: true, description: 'Desplegar service-discovery')
     booleanParam(name: 'DEPLOY_USER_SERVICE', defaultValue: true, description: 'Desplegar user-service')
     booleanParam(name: 'DEPLOY_PRODUCT_SERVICE', defaultValue: true, description: 'Desplegar product-service')
     booleanParam(name: 'DEPLOY_ORDER_SERVICE', defaultValue: true, description: 'Desplegar order-service')
@@ -52,8 +53,9 @@ pipeline {
     stage('Detect Service Changes') {
       steps {
         script {
-          // Mapa de servicios con sus puertos
+          // Mapa de servicios con sus puertos (service-discovery PRIMERO)
           def servicesData = [
+            'service-discovery': '8761',
             'user-service': '8085',
             'product-service': '8083',
             'order-service': '8081',
@@ -64,6 +66,7 @@ pipeline {
 
           // Configuración de qué servicios desplegar
           def deployFlags = [
+            'service-discovery': params.DEPLOY_SERVICE_DISCOVERY,
             'user-service': params.DEPLOY_USER_SERVICE,
             'product-service': params.DEPLOY_PRODUCT_SERVICE,
             'order-service': params.DEPLOY_ORDER_SERVICE,
@@ -177,14 +180,26 @@ pipeline {
             def imageTag = params.DOCKER_IMAGE_TAG?.trim() ?: 'latest'
             def servicesToDeploy = env.SERVICES_TO_DEPLOY.split(',')
 
-            // Mapa de puertos por servicio
+            // Mapa de puertos por servicio (service-discovery PRIMERO)
             def servicePorts = [
+              'service-discovery': '8761',
               'user-service': '8085',
               'product-service': '8083',
               'order-service': '8081',
               'shipping-service': '8084',
               'payment-service': '8082',
               'favourite-service': '8086'
+            ]
+            
+            // Mapa de health check paths por servicio
+            def serviceHealthPaths = [
+              'service-discovery': '/actuator/health',
+              'user-service': '/user-service/actuator/health',
+              'product-service': '/product-service/actuator/health',
+              'order-service': '/order-service/actuator/health',
+              'shipping-service': '/shipping-service/actuator/health',
+              'payment-service': '/payment-service/actuator/health',
+              'favourite-service': '/favourite-service/actuator/health'
             ]
             
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -198,6 +213,7 @@ pipeline {
             // Desplegar cada servicio
             servicesToDeploy.each { serviceName ->
               def servicePort = servicePorts[serviceName]
+              def healthPath = serviceHealthPaths[serviceName]
               def dockerHubImage = "${DOCKER_USER}/${serviceName}:${imageTag}"
               
               echo ""
@@ -212,6 +228,7 @@ pipeline {
                 "K8S_NAMESPACE=${params.K8S_NAMESPACE}",
                 "SERVICE_NAME=${serviceName}",
                 "SERVICE_PORT=${servicePort}",
+                "SERVICE_HEALTH_PATH=${healthPath}",
                 "DOCKER_HUB_IMAGE=${dockerHubImage}",
                 "REPLICA_COUNT=${params.REPLICA_COUNT}",
                 "GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}"
@@ -297,7 +314,7 @@ spec:
             memory: 1Gi
         livenessProbe:
           httpGet:
-            path: /${SERVICE_NAME}/actuator/health
+            path: ${SERVICE_HEALTH_PATH}
             port: ${SERVICE_PORT}
           initialDelaySeconds: 60
           periodSeconds: 10
@@ -305,7 +322,7 @@ spec:
           failureThreshold: 3
         readinessProbe:
           httpGet:
-            path: /${SERVICE_NAME}/actuator/health
+            path: ${SERVICE_HEALTH_PATH}
             port: ${SERVICE_PORT}
           initialDelaySeconds: 30
           periodSeconds: 5
@@ -372,12 +389,24 @@ kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE}
 
             // Mapa de puertos por servicio
             def servicePorts = [
+              'service-discovery': '8761',
               'user-service': '8085',
               'product-service': '8083',
               'order-service': '8081',
               'shipping-service': '8084',
               'payment-service': '8082',
               'favourite-service': '8086'
+            ]
+
+            // Mapa de health check paths por servicio
+            def serviceHealthPaths = [
+              'service-discovery': '/actuator/health',
+              'user-service': '/user-service/actuator/health',
+              'product-service': '/product-service/actuator/health',
+              'order-service': '/order-service/actuator/health',
+              'shipping-service': '/shipping-service/actuator/health',
+              'payment-service': '/payment-service/actuator/health',
+              'favourite-service': '/favourite-service/actuator/health'
             ]
             
             echo ""
@@ -389,6 +418,7 @@ kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE}
             
             servicesToDeploy.each { serviceName ->
               def servicePort = servicePorts[serviceName]
+              def healthPath = serviceHealthPaths[serviceName]
               
               echo ""
               echo "🏥 Verificando ${serviceName}..."
@@ -400,6 +430,7 @@ kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE}
                 "K8S_NAMESPACE=${params.K8S_NAMESPACE}",
                 "SERVICE_NAME=${serviceName}",
                 "SERVICE_PORT=${servicePort}",
+                "SERVICE_HEALTH_PATH=${healthPath}",
                 "GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}"
               ]) {
                 try {
@@ -433,7 +464,7 @@ HEALTH_STATUS=""
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
   HEALTH_RESPONSE=$(kubectl exec -n "${K8S_NAMESPACE}" deployment/"${SERVICE_NAME}" -- \
-    curl -s http://localhost:"${SERVICE_PORT}"/${SERVICE_NAME}/actuator/health 2>/dev/null || echo "ERROR")
+    curl -s http://localhost:"${SERVICE_PORT}"${SERVICE_HEALTH_PATH} 2>/dev/null || echo "ERROR")
   
   if echo "$HEALTH_RESPONSE" | grep -q '"status":"UP"' || echo "$HEALTH_RESPONSE" | grep -q '"status" : "UP"'; then
     HEALTH_STATUS="UP"
@@ -475,6 +506,57 @@ fi
               echo "${icon} ${service}: ${status}"
             }
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          }
+        }
+      }
+    }
+
+    stage('Run E2E Tests') {
+      when {
+        expression { env.SERVICES_TO_DEPLOY != null && env.SERVICES_TO_DEPLOY != '' }
+      }
+      steps {
+        withCredentials([
+          file(credentialsId: 'gcp-service-account', variable: 'GOOGLE_APPLICATION_CREDENTIALS'),
+          string(credentialsId: 'gcp-project-id', variable: 'GCP_PROJECT_ID')
+        ]) {
+          script {
+            withEnv([
+              "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
+              "GKE_CLUSTER_NAME=${params.GKE_CLUSTER_NAME}",
+              "GKE_LOCATION=${params.GKE_LOCATION}",
+              "K8S_NAMESPACE=${params.K8S_NAMESPACE}",
+              "GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}"
+            ]) {
+              sh '''
+set -e
+
+# Configure PATH for gcloud and kubectl
+export PATH="/usr/local/bin:/usr/bin:/bin:/opt/google-cloud-sdk/google-cloud-sdk/bin:/opt/google-cloud-sdk/bin:$PATH"
+
+# Verify gcloud is available
+if ! command -v gcloud > /dev/null 2>&1; then
+  echo "❌ Error: gcloud no encontrado"
+  exit 1
+fi
+
+# Verify kubectl is available
+if ! command -v kubectl > /dev/null 2>&1; then
+  echo "❌ Error: kubectl no encontrado"
+  exit 1
+fi
+
+# Authenticate with GCP and configure kubectl
+gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}"
+gcloud config set project "${GCP_PROJECT_ID}"
+gcloud container clusters get-credentials "${GKE_CLUSTER_NAME}" \
+  --zone "${GKE_LOCATION}" \
+  --project "${GCP_PROJECT_ID}"
+
+# Execute E2E tests script
+./jenkins/scripts/run-e2e-gke.sh "${K8S_NAMESPACE}" "${GCP_PROJECT_ID}" "${GKE_CLUSTER_NAME}" "${GKE_LOCATION}"
+'''
+            }
           }
         }
       }
