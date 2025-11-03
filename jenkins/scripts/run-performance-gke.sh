@@ -59,9 +59,9 @@ if ! command -v python3 > /dev/null 2>&1; then
   exit 1
 fi
 
-# Verify pip3 is available
-if ! command -v pip3 > /dev/null 2>&1; then
-  echo -e "${RED}❌ Error: pip3 no encontrado${NC}"
+# Try to verify pip is available (either pip or pip3)
+if ! python3 -m pip --version >/dev/null 2>&1; then
+  echo -e "${RED}❌ Error: pip no disponible con python3${NC}"
   exit 1
 fi
 
@@ -121,6 +121,7 @@ export PERF_TEST_SPAWN_RATE="${PERF_TEST_SPAWN_RATE}"
 export PERF_TEST_DURATION="${PERF_TEST_DURATION}"
 export SERVICES_TO_TEST="${SERVICES_TO_TEST}"
 
+# Execute the performance tests script
 ./run-performance-gke.sh
 
 echo ""
