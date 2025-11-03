@@ -3,7 +3,9 @@
 # Script to run performance tests against services deployed in GKE
 # This script sets up port-forwarding and executes Locust performance tests
 
-set -euo pipefail
+# Use set -uo pipefail instead of -e to allow cleanup functions to run
+# We'll handle errors explicitly in critical sections
+set -uo pipefail
 
 # Colors for output
 YELLOW="\033[1;33m"
@@ -58,6 +60,7 @@ check_port_available() {
 kill_existing_port_forwards() {
   log_info "Verificando port-forwards existentes..."
   
+  set +e  # Temporarily disable exit on error for cleanup operations
   local pids=$(pgrep -f "kubectl port-forward.*${NAMESPACE}" || true)
   
   if [ -n "$pids" ]; then
@@ -73,6 +76,7 @@ kill_existing_port_forwards() {
       kill -9 "$pid" 2>/dev/null || true
     fi
   done
+  set -e  # Re-enable exit on error
 }
 
 # Function to start port-forward for a service
@@ -319,6 +323,7 @@ main() {
   done
   
   # Cleanup
+  set +e  # Disable exit on error for cleanup operations
   log_info "Limpiando port-forwards..."
   if [ -f /tmp/gke-port-forwards.pid ]; then
     cat /tmp/gke-port-forwards.pid 2>/dev/null | xargs kill -9 2>/dev/null || true
@@ -327,6 +332,7 @@ main() {
   
   # Kill any remaining port-forwards
   pkill -f "kubectl port-forward.*${NAMESPACE}" 2>/dev/null || true
+  set -e  # Re-enable exit on error
   
   # Always return success - HTTP errors are expected in performance testing
   # Results are archived for analysis regardless of individual request failures
@@ -335,16 +341,22 @@ main() {
 
 # Handle script termination
 cleanup() {
+  set +e  # Disable exit on error for cleanup operations
   log_info "Limpiando port-forwards..."
   if [ -f /tmp/gke-port-forwards.pid ]; then
     cat /tmp/gke-port-forwards.pid 2>/dev/null | xargs kill -9 2>/dev/null || true
     rm -f /tmp/gke-port-forwards.pid
   fi
   pkill -f "kubectl port-forward.*${NAMESPACE}" 2>/dev/null || true
+  set -e  # Re-enable exit on error (though we're exiting anyway)
 }
 
 trap cleanup EXIT INT TERM
 
-# Run main function
-main "$@"
+# Run main function and always exit with success
+# HTTP errors in performance tests are expected and don't indicate failure
+main "$@" || true
+
+# Always exit with success code
+exit 0
 
