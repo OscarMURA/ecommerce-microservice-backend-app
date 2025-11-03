@@ -4,7 +4,7 @@ pipeline {
 
   parameters {
     string(name: 'DOCKER_IMAGE_TAG', defaultValue: 'latest', description: 'Tag de la imagen en Docker Hub a desplegar')
-    string(name: 'GKE_CLUSTER_NAME', defaultValue: 'ecommerce-prod-gke', description: 'Nombre del cluster GKE de producción')
+    string(name: 'GKE_CLUSTER_NAME', defaultValue: 'ecommerce-dev-gke-v2', description: 'Nombre del cluster GKE de producción')
     string(name: 'GKE_LOCATION', defaultValue: 'us-central1-a', description: 'Zona o región del cluster GKE')
     string(name: 'K8S_NAMESPACE', defaultValue: 'prod', description: 'Namespace de Kubernetes donde se desplegará (PRODUCCIÓN)')
     string(name: 'REPLICA_COUNT', defaultValue: '2', description: 'Número de réplicas por servicio (recomendado mínimo 2 en prod)')
