@@ -26,6 +26,14 @@ print_status() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
 
+# Detect environment mode
+PERF_TEST_ENV="${PERF_TEST_ENV:-development}"
+IS_MINIKUBE=false
+if [ "$PERF_TEST_ENV" = "minikube" ]; then
+    IS_MINIKUBE=true
+    print_status "Running in Minikube mode"
+fi
+
 print_success() {
     echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
@@ -42,33 +50,65 @@ print_error() {
 check_services() {
     print_status "Checking if microservices are running..."
     
-    local services=(
-        "http://localhost:8080/app/actuator/health:API Gateway"
-        "http://localhost:8700/user-service/actuator/health:User Service"
-        "http://localhost:8500/product-service/actuator/health:Product Service"
-        "http://localhost:8300/order-service/actuator/health:Order Service"
-        "http://localhost:8400/payment-service/actuator/health:Payment Service"
-        "http://localhost:8800/favourite-service/actuator/health:Favourite Service"
-        "http://localhost:8600/shipping-service/actuator/health:Shipping Service"
-    )
+    if [ "$IS_MINIKUBE" = true ]; then
+        # Minikube mode - check services with Minikube ports
+        local services=(
+            "http://localhost:8081/order-service/actuator/health:Order Service"
+            "http://localhost:8082/payment-service/actuator/health:Payment Service"
+            "http://localhost:8083/product-service/actuator/health:Product Service"
+            "http://localhost:8084/shipping-service/actuator/health:Shipping Service"
+            "http://localhost:8085/user-service/actuator/health:User Service"
+            "http://localhost:8086/favourite-service/actuator/health:Favourite Service"
+        )
+        
+        print_status "Verificando que los port-forwards estén configurados..."
+        if ! pgrep -f "kubectl port-forward.*ecommerce" > /dev/null; then
+            print_warning "No se encontraron port-forwards activos"
+            print_status "Ejecutando setup-minikube-ports.sh..."
+            "${PERFORMANCE_TESTS_DIR}/setup-minikube-ports.sh" || {
+                print_error "No se pudieron configurar los port-forwards"
+                print_status "Ejecuta manualmente: ./setup-minikube-ports.sh"
+                exit 1
+            }
+        fi
+    else
+        # Development mode - check services with development ports
+        local services=(
+            "http://localhost:8080/app/actuator/health:API Gateway"
+            "http://localhost:8700/user-service/actuator/health:User Service"
+            "http://localhost:8500/product-service/actuator/health:Product Service"
+            "http://localhost:8300/order-service/actuator/health:Order Service"
+            "http://localhost:8400/payment-service/actuator/health:Payment Service"
+            "http://localhost:8800/favourite-service/actuator/health:Favourite Service"
+            "http://localhost:8600/shipping-service/actuator/health:Shipping Service"
+        )
+    fi
     
     local failed_services=()
     
     for service in "${services[@]}"; do
-        local url=$(echo $service | cut -d: -f1-2)
-        local name=$(echo $service | cut -d: -f3)
+        # Parse URL and service name correctly
+        # Format: "http://localhost:PORT/SERVICE_PATH/actuator/health:Service Name"
+        # Extract everything before the last colon as URL, and after as name
+        local url=$(echo "$service" | sed 's/:[^:]*$//')
+        local name=$(echo "$service" | sed 's/.*://')
         
         if curl -s -f "$url" > /dev/null 2>&1; then
             print_success "$name is running"
         else
-            print_error "$name is not responding"
+            print_error "$name is not responding at $url"
             failed_services+=("$name")
         fi
     done
     
     if [ ${#failed_services[@]} -gt 0 ]; then
-        print_error "Some services are not running. Please start them first:"
-        print_status "Run: cd ../scripts && ./start-services.sh"
+        print_error "Some services are not running."
+        if [ "$IS_MINIKUBE" = true ]; then
+            print_status "Para Minikube, ejecuta: ./setup-minikube-ports.sh"
+            print_status "Y verifica que los servicios estén desplegados: kubectl get pods -n ecommerce"
+        else
+            print_status "Run: cd ../scripts && ./start-services.sh"
+        fi
         exit 1
     fi
 }
@@ -104,21 +144,45 @@ run_performance_tests() {
     local results_file="${RESULTS_DIR}/${test_type}_${TIMESTAMP}.html"
     local csv_prefix="${RESULTS_DIR}/${test_type}_${TIMESTAMP}"
     
+    # Determine host URLs based on environment
+    if [ "$IS_MINIKUBE" = true ]; then
+        local USER_SERVICE_HOST="http://localhost:8085"
+        local PRODUCT_SERVICE_HOST="http://localhost:8083"
+        local ORDER_SERVICE_HOST="http://localhost:8081"
+        local PAYMENT_SERVICE_HOST="http://localhost:8082"
+        local FAVOURITE_SERVICE_HOST="http://localhost:8086"
+        local SHIPPING_SERVICE_HOST="http://localhost:8084"
+    else
+        local USER_SERVICE_HOST="http://localhost:8700"
+        local PRODUCT_SERVICE_HOST="http://localhost:8500"
+        local ORDER_SERVICE_HOST="http://localhost:8300"
+        local PAYMENT_SERVICE_HOST="http://localhost:8400"
+        local FAVOURITE_SERVICE_HOST="http://localhost:8800"
+        local SHIPPING_SERVICE_HOST="http://localhost:8600"
+    fi
+    
     case $test_type in
         "ecommerce")
-            locust -f "${PERFORMANCE_TESTS_DIR}/ecommerce_performance_tests.py" \
-                   --host="$LOCUST_HOST" \
-                   --users="$users" \
-                   --spawn-rate="$spawn_rate" \
-                   --run-time="$duration" \
-                   --html="$results_file" \
-                   --csv="$csv_prefix" \
-                   --headless
+            if [ "$IS_MINIKUBE" = true ]; then
+                print_warning "E-commerce tests require API Gateway. Minikube deployment doesn't include API Gateway."
+                print_status "Running individual service tests instead..."
+                print_error "Use individual service tests for Minikube: user-service, product-service, etc."
+                exit 1
+            else
+                locust -f "${PERFORMANCE_TESTS_DIR}/ecommerce_performance_tests.py" \
+                       --host="$LOCUST_HOST" \
+                       --users="$users" \
+                       --spawn-rate="$spawn_rate" \
+                       --run-time="$duration" \
+                       --html="$results_file" \
+                       --csv="$csv_prefix" \
+                       --headless
+            fi
             ;;
         "user-service")
             locust -f "${PERFORMANCE_TESTS_DIR}/individual_service_tests.py" \
                    UserServiceUser \
-                   --host="http://localhost:8700" \
+                   --host="$USER_SERVICE_HOST" \
                    --users="$users" \
                    --spawn-rate="$spawn_rate" \
                    --run-time="$duration" \
@@ -129,7 +193,7 @@ run_performance_tests() {
         "product-service")
             locust -f "${PERFORMANCE_TESTS_DIR}/individual_service_tests.py" \
                    ProductServiceUser \
-                   --host="http://localhost:8500" \
+                   --host="$PRODUCT_SERVICE_HOST" \
                    --users="$users" \
                    --spawn-rate="$spawn_rate" \
                    --run-time="$duration" \
@@ -140,7 +204,7 @@ run_performance_tests() {
         "order-service")
             locust -f "${PERFORMANCE_TESTS_DIR}/individual_service_tests.py" \
                    OrderServiceUser \
-                   --host="http://localhost:8300" \
+                   --host="$ORDER_SERVICE_HOST" \
                    --users="$users" \
                    --spawn-rate="$spawn_rate" \
                    --run-time="$duration" \
@@ -151,7 +215,7 @@ run_performance_tests() {
         "payment-service")
             locust -f "${PERFORMANCE_TESTS_DIR}/individual_service_tests.py" \
                    PaymentServiceUser \
-                   --host="http://localhost:8400" \
+                   --host="$PAYMENT_SERVICE_HOST" \
                    --users="$users" \
                    --spawn-rate="$spawn_rate" \
                    --run-time="$duration" \
@@ -162,7 +226,7 @@ run_performance_tests() {
         "favourite-service")
             locust -f "${PERFORMANCE_TESTS_DIR}/individual_service_tests.py" \
                    FavouriteServiceUser \
-                   --host="http://localhost:8800" \
+                   --host="$FAVOURITE_SERVICE_HOST" \
                    --users="$users" \
                    --spawn-rate="$spawn_rate" \
                    --run-time="$duration" \
@@ -173,7 +237,7 @@ run_performance_tests() {
         "shipping-service")
             locust -f "${PERFORMANCE_TESTS_DIR}/individual_service_tests.py" \
                    ShippingServiceUser \
-                   --host="http://localhost:8600" \
+                   --host="$SHIPPING_SERVICE_HOST" \
                    --users="$users" \
                    --spawn-rate="$spawn_rate" \
                    --run-time="$duration" \
@@ -218,9 +282,14 @@ run_stress_tests() {
                    --headless
             ;;
         "user-service")
+            if [ "$IS_MINIKUBE" = true ]; then
+                local USER_SERVICE_HOST="http://localhost:8085"
+            else
+                local USER_SERVICE_HOST="http://localhost:8700"
+            fi
             locust -f "${PERFORMANCE_TESTS_DIR}/individual_service_tests.py" \
                    UserServiceStressUser \
-                   --host="http://localhost:8700" \
+                   --host="$USER_SERVICE_HOST" \
                    --users="$users" \
                    --spawn-rate="$spawn_rate" \
                    --run-time="$duration" \
@@ -229,9 +298,14 @@ run_stress_tests() {
                    --headless
             ;;
         "product-service")
+            if [ "$IS_MINIKUBE" = true ]; then
+                local PRODUCT_SERVICE_HOST="http://localhost:8083"
+            else
+                local PRODUCT_SERVICE_HOST="http://localhost:8500"
+            fi
             locust -f "${PERFORMANCE_TESTS_DIR}/individual_service_tests.py" \
                    ProductServiceStressUser \
-                   --host="http://localhost:8500" \
+                   --host="$PRODUCT_SERVICE_HOST" \
                    --users="$users" \
                    --spawn-rate="$spawn_rate" \
                    --run-time="$duration" \
@@ -319,10 +393,18 @@ show_help() {
     echo "  $0 stress user-service 100 10 3m"
     echo "  $0 interactive ecommerce"
     echo ""
+    echo "Minikube Mode:"
+    echo "  PERF_TEST_ENV=minikube $0 check"
+    echo "  PERF_TEST_ENV=minikube $0 performance user-service 30 3 5m"
+    echo "  # First setup port-forwarding: ./setup-minikube-ports.sh"
+    echo ""
     echo "Parameters:"
     echo "  USERS                      Number of concurrent users"
     echo "  SPAWN_RATE                 Users spawned per second"
     echo "  DURATION                   Test duration (e.g., 5m, 30s, 1h)"
+    echo ""
+    echo "Environment Variables:"
+    echo "  PERF_TEST_ENV              Environment mode: development, minikube, staging, production"
 }
 
 # Main script logic
@@ -358,15 +440,29 @@ main() {
                 exit 1
             fi
             check_services
+            if [ "$IS_MINIKUBE" = true ]; then
+                local USER_SERVICE_HOST="http://localhost:8085"
+                local PRODUCT_SERVICE_HOST="http://localhost:8083"
+            else
+                local USER_SERVICE_HOST="http://localhost:8700"
+                local PRODUCT_SERVICE_HOST="http://localhost:8500"
+            fi
+            
             case "$2" in
                 "ecommerce")
-                    run_interactive "${PERFORMANCE_TESTS_DIR}/ecommerce_performance_tests.py" "$LOCUST_HOST"
+                    if [ "$IS_MINIKUBE" = true ]; then
+                        print_error "E-commerce tests require API Gateway. Minikube doesn't include API Gateway."
+                        print_status "Use individual service tests instead."
+                        exit 1
+                    else
+                        run_interactive "${PERFORMANCE_TESTS_DIR}/ecommerce_performance_tests.py" "$LOCUST_HOST"
+                    fi
                     ;;
                 "user-service")
-                    run_interactive "${PERFORMANCE_TESTS_DIR}/individual_service_tests.py" "http://localhost:8700"
+                    run_interactive "${PERFORMANCE_TESTS_DIR}/individual_service_tests.py" "$USER_SERVICE_HOST"
                     ;;
                 "product-service")
-                    run_interactive "${PERFORMANCE_TESTS_DIR}/individual_service_tests.py" "http://localhost:8500"
+                    run_interactive "${PERFORMANCE_TESTS_DIR}/individual_service_tests.py" "$PRODUCT_SERVICE_HOST"
                     ;;
                 *)
                     print_error "Unknown interactive test type: $2"

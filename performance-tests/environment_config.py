@@ -67,6 +67,50 @@ PRODUCTION_CONFIG = {
     }
 }
 
+# Minikube Environment
+# Note: Requires port-forwarding to be configured using setup-minikube-ports.sh
+MINIKUBE_CONFIG = {
+    "host": "http://localhost:8080",  # Not used - no API Gateway in Minikube
+    "max_users": 100,
+    "default_duration": "10m",
+    "spawn_rate": 5,
+    "expected_metrics": {
+        "response_time_p95": 3000,
+        "error_rate": 0.05,
+        "throughput": 50
+    },
+    "services": {
+        "user-service": "http://localhost:8085",      # Port-forwarded from Minikube
+        "product-service": "http://localhost:8083",   # Port-forwarded from Minikube
+        "order-service": "http://localhost:8081",     # Port-forwarded from Minikube
+        "payment-service": "http://localhost:8082",   # Port-forwarded from Minikube
+        "favourite-service": "http://localhost:8086",  # Port-forwarded from Minikube
+        "shipping-service": "http://localhost:8084"    # Port-forwarded from Minikube
+    }
+}
+
+# GKE Staging Environment
+# Note: Requires port-forwarding to be configured using run-performance-gke.sh
+GKE_CONFIG = {
+    "host": "http://localhost:8080",  # Not used - no API Gateway in GKE staging
+    "max_users": 50,
+    "default_duration": "5m",
+    "spawn_rate": 5,
+    "expected_metrics": {
+        "response_time_p95": 2000,
+        "error_rate": 0.03,
+        "throughput": 40
+    },
+    "services": {
+        "user-service": "http://localhost:8085",      # Port-forwarded from GKE
+        "product-service": "http://localhost:8083",   # Port-forwarded from GKE
+        "order-service": "http://localhost:8081",     # Port-forwarded from GKE
+        "payment-service": "http://localhost:8082",   # Port-forwarded from GKE
+        "favourite-service": "http://localhost:8086",  # Port-forwarded from GKE
+        "shipping-service": "http://localhost:8084"    # Port-forwarded from GKE
+    }
+}
+
 # =============================================================================
 # TEST SCENARIO TEMPLATES
 # =============================================================================
@@ -367,7 +411,9 @@ def get_environment_config():
     configs = {
         'development': DEVELOPMENT_CONFIG,
         'staging': STAGING_CONFIG,
-        'production': PRODUCTION_CONFIG
+        'production': PRODUCTION_CONFIG,
+        'minikube': MINIKUBE_CONFIG,
+        'gke': GKE_CONFIG
     }
     
     return configs.get(env, DEVELOPMENT_CONFIG)

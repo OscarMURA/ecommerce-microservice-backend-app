@@ -16,6 +16,9 @@ pipeline {
     booleanParam(name: 'DEPLOY_PAYMENT_SERVICE', defaultValue: true, description: 'Desplegar payment-service')
     booleanParam(name: 'DEPLOY_FAVOURITE_SERVICE', defaultValue: true, description: 'Desplegar favourite-service')
     booleanParam(name: 'FORCE_DEPLOY_ALL', defaultValue: false, description: 'Forzar despliegue de todos los servicios seleccionados')
+    string(name: 'PERF_TEST_USERS', defaultValue: '20', description: 'Número de usuarios concurrentes para pruebas de rendimiento')
+    string(name: 'PERF_TEST_SPAWN_RATE', defaultValue: '2', description: 'Usuarios creados por segundo (spawn rate)')
+    string(name: 'PERF_TEST_DURATION', defaultValue: '5m', description: 'Duración de las pruebas de rendimiento (ej: 5m, 10m)')
   }
 
   environment {
@@ -506,6 +509,47 @@ fi
               echo "${icon} ${service}: ${status}"
             }
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          }
+        }
+      }
+    }
+
+    stage('Run Performance Tests') {
+      when {
+        expression { env.SERVICES_TO_DEPLOY != null && env.SERVICES_TO_DEPLOY != '' }
+      }
+      steps {
+        withCredentials([
+          file(credentialsId: 'gcp-service-account', variable: 'GOOGLE_APPLICATION_CREDENTIALS'),
+          string(credentialsId: 'gcp-project-id', variable: 'GCP_PROJECT_ID')
+        ]) {
+          script {
+            withEnv([
+              "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
+              "GKE_CLUSTER_NAME=${params.GKE_CLUSTER_NAME}",
+              "GKE_LOCATION=${params.GKE_LOCATION}",
+              "K8S_NAMESPACE=${params.K8S_NAMESPACE}",
+              "GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}",
+              "PERF_TEST_USERS=${params.PERF_TEST_USERS ?: '20'}",
+              "PERF_TEST_SPAWN_RATE=${params.PERF_TEST_SPAWN_RATE ?: '2'}",
+              "PERF_TEST_DURATION=${params.PERF_TEST_DURATION ?: '5m'}",
+              "SERVICES_TO_DEPLOY=${env.SERVICES_TO_DEPLOY}"
+            ]) {
+              sh """
+./jenkins/scripts/run-performance-gke.sh \
+  "${params.K8S_NAMESPACE}" \
+  "${GCP_PROJECT_ID}" \
+  "${params.GKE_CLUSTER_NAME}" \
+  "${params.GKE_LOCATION}" \
+  "${env.SERVICES_TO_DEPLOY}" \
+  "${params.PERF_TEST_USERS ?: '20'}" \
+  "${params.PERF_TEST_SPAWN_RATE ?: '2'}" \
+  "${params.PERF_TEST_DURATION ?: '5m'}"
+"""
+            }
+            
+            // Archive performance test results as artifacts
+            archiveArtifacts artifacts: 'performance-results/**/*', allowEmptyArchive: true
           }
         }
       }
