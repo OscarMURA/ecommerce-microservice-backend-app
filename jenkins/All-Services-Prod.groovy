@@ -420,8 +420,26 @@ echo "⏳ Esperando que el deployment esté listo (timeout 5 min)..."
 kubectl wait --for=condition=available --timeout=300s \
   deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} || {
   echo "❌ Timeout esperando deployment. Verificando estado..."
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "📦 Estado de los Pods:"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME}
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "📋 Describe Deployment:"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   kubectl describe deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "📝 Logs de los Pods (últimas 50 líneas):"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME} -o name | head -1 | xargs -I {} kubectl logs {} -n ${K8S_NAMESPACE} --tail=50 || echo "⚠️ No se pudieron obtener logs"
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "🔍 Describe del Pod (para ver eventos):"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME} -o name | head -1 | xargs -I {} kubectl describe {} -n ${K8S_NAMESPACE} || echo "⚠️ No se pudo obtener describe del pod"
   exit 1
 }
 
