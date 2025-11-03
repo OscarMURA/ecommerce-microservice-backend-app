@@ -44,6 +44,27 @@ pipeline {
       }
     }
 
+    stage('Validate and Fix Cluster Name') {
+      steps {
+        script {
+          // Forzar el uso del cluster correcto (ecommerce-dev-gke-v2)
+          // El único cluster que existe es ecommerce-dev-gke-v2, no ecommerce-prod-gke
+          def correctClusterName = 'ecommerce-dev-gke-v2'
+          def providedClusterName = params.GKE_CLUSTER_NAME?.trim() ?: 'ecommerce-dev-gke-v2'
+          
+          if (providedClusterName != correctClusterName) {
+            echo "⚠️  Advertencia: El parámetro GKE_CLUSTER_NAME tiene un valor incorrecto: '${providedClusterName}'"
+            echo "✅ Usando automáticamente el cluster correcto: '${correctClusterName}'"
+            echo "ℹ️  Nota: El cluster ecommerce-prod-gke no existe. Usando ecommerce-dev-gke-v2 con namespace 'prod'"
+            env.GKE_CLUSTER_NAME_CORRECTED = correctClusterName
+          } else {
+            env.GKE_CLUSTER_NAME_CORRECTED = correctClusterName
+          }
+          echo "✅ Cluster validado: ${env.GKE_CLUSTER_NAME_CORRECTED}"
+        }
+      }
+    }
+
     stage('Checkout') {
       steps {
         checkout scm
@@ -270,7 +291,7 @@ echo "✅ Release Notes generadas exitosamente"
 
               withEnv([
                 "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
-                "GKE_CLUSTER_NAME=${params.GKE_CLUSTER_NAME}",
+                "GKE_CLUSTER_NAME=${env.GKE_CLUSTER_NAME_CORRECTED}",
                 "GKE_LOCATION=${params.GKE_LOCATION}",
                 "K8S_NAMESPACE=${params.K8S_NAMESPACE}",
                 "SERVICE_NAME=${serviceName}",
@@ -472,7 +493,7 @@ kubectl get service ${SERVICE_NAME} -n ${K8S_NAMESPACE}
               
               withEnv([
                 "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
-                "GKE_CLUSTER_NAME=${params.GKE_CLUSTER_NAME}",
+                "GKE_CLUSTER_NAME=${env.GKE_CLUSTER_NAME_CORRECTED}",
                 "GKE_LOCATION=${params.GKE_LOCATION}",
                 "K8S_NAMESPACE=${params.K8S_NAMESPACE}",
                 "SERVICE_NAME=${serviceName}",
@@ -572,7 +593,7 @@ fi
           script {
             withEnv([
               "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
-              "GKE_CLUSTER_NAME=${params.GKE_CLUSTER_NAME}",
+              "GKE_CLUSTER_NAME=${env.GKE_CLUSTER_NAME_CORRECTED}",
               "GKE_LOCATION=${params.GKE_LOCATION}",
               "K8S_NAMESPACE=${params.K8S_NAMESPACE}",
               "GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}"
@@ -624,7 +645,7 @@ echo "🧪 Ejecutando pruebas E2E en ambiente de PRODUCCIÓN..."
           script {
             withEnv([
               "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
-              "GKE_CLUSTER_NAME=${params.GKE_CLUSTER_NAME}",
+              "GKE_CLUSTER_NAME=${env.GKE_CLUSTER_NAME_CORRECTED}",
               "GKE_LOCATION=${params.GKE_LOCATION}",
               "K8S_NAMESPACE=${params.K8S_NAMESPACE}",
               "GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}",
@@ -638,7 +659,7 @@ echo "⚡ Ejecutando pruebas de rendimiento en PRODUCCIÓN..."
 ./jenkins/scripts/run-performance-gke.sh \
   "${params.K8S_NAMESPACE}" \
   "${GCP_PROJECT_ID}" \
-  "${params.GKE_CLUSTER_NAME}" \
+  "${env.GKE_CLUSTER_NAME_CORRECTED}" \
   "${params.GKE_LOCATION}" \
   "${env.SERVICES_TO_DEPLOY}" \
   "${params.PERF_TEST_USERS ?: '50'}" \
@@ -670,7 +691,7 @@ echo "⚡ Ejecutando pruebas de rendimiento en PRODUCCIÓN..."
           script {
             withEnv([
               "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
-              "GKE_CLUSTER_NAME=${params.GKE_CLUSTER_NAME}",
+              "GKE_CLUSTER_NAME=${env.GKE_CLUSTER_NAME_CORRECTED}",
               "GKE_LOCATION=${params.GKE_LOCATION}",
               "K8S_NAMESPACE=${params.K8S_NAMESPACE}",
               "GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}"
