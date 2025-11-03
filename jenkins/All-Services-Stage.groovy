@@ -514,46 +514,7 @@ fi
       }
     }
 
-    stage('Run Performance Tests') {
-      when {
-        expression { env.SERVICES_TO_DEPLOY != null && env.SERVICES_TO_DEPLOY != '' }
-      }
-      steps {
-        withCredentials([
-          file(credentialsId: 'gcp-service-account', variable: 'GOOGLE_APPLICATION_CREDENTIALS'),
-          string(credentialsId: 'gcp-project-id', variable: 'GCP_PROJECT_ID')
-        ]) {
-          script {
-            withEnv([
-              "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
-              "GKE_CLUSTER_NAME=${params.GKE_CLUSTER_NAME}",
-              "GKE_LOCATION=${params.GKE_LOCATION}",
-              "K8S_NAMESPACE=${params.K8S_NAMESPACE}",
-              "GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}",
-              "PERF_TEST_USERS=${params.PERF_TEST_USERS ?: '20'}",
-              "PERF_TEST_SPAWN_RATE=${params.PERF_TEST_SPAWN_RATE ?: '2'}",
-              "PERF_TEST_DURATION=${params.PERF_TEST_DURATION ?: '5m'}",
-              "SERVICES_TO_DEPLOY=${env.SERVICES_TO_DEPLOY}"
-            ]) {
-              sh """
-./jenkins/scripts/run-performance-gke.sh \
-  "${params.K8S_NAMESPACE}" \
-  "${GCP_PROJECT_ID}" \
-  "${params.GKE_CLUSTER_NAME}" \
-  "${params.GKE_LOCATION}" \
-  "${env.SERVICES_TO_DEPLOY}" \
-  "${params.PERF_TEST_USERS ?: '20'}" \
-  "${params.PERF_TEST_SPAWN_RATE ?: '2'}" \
-  "${params.PERF_TEST_DURATION ?: '5m'}"
-"""
-            }
-            
-            // Archive performance test results as artifacts
-            archiveArtifacts artifacts: 'performance-results/**/*', allowEmptyArchive: true
-          }
-        }
-      }
-    }
+    
 
     stage('Run E2E Tests') {
       when {
@@ -605,6 +566,52 @@ gcloud container clusters get-credentials "${GKE_CLUSTER_NAME}" \
         }
       }
     }
+
+    stage('Run Performance Tests') {
+      when {
+        expression { env.SERVICES_TO_DEPLOY != null && env.SERVICES_TO_DEPLOY != '' }
+      }
+      steps {
+        withCredentials([
+          file(credentialsId: 'gcp-service-account', variable: 'GOOGLE_APPLICATION_CREDENTIALS'),
+          string(credentialsId: 'gcp-project-id', variable: 'GCP_PROJECT_ID')
+        ]) {
+          script {
+            withEnv([
+              "GCP_PROJECT_ID=${GCP_PROJECT_ID}",
+              "GKE_CLUSTER_NAME=${params.GKE_CLUSTER_NAME}",
+              "GKE_LOCATION=${params.GKE_LOCATION}",
+              "K8S_NAMESPACE=${params.K8S_NAMESPACE}",
+              "GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}",
+              "PERF_TEST_USERS=${params.PERF_TEST_USERS ?: '20'}",
+              "PERF_TEST_SPAWN_RATE=${params.PERF_TEST_SPAWN_RATE ?: '2'}",
+              "PERF_TEST_DURATION=${params.PERF_TEST_DURATION ?: '5m'}",
+              "SERVICES_TO_DEPLOY=${env.SERVICES_TO_DEPLOY}"
+            ]) {
+              sh """
+./jenkins/scripts/run-performance-gke.sh \
+  "${params.K8S_NAMESPACE}" \
+  "${GCP_PROJECT_ID}" \
+  "${params.GKE_CLUSTER_NAME}" \
+  "${params.GKE_LOCATION}" \
+  "${env.SERVICES_TO_DEPLOY}" \
+  "${params.PERF_TEST_USERS ?: '20'}" \
+  "${params.PERF_TEST_SPAWN_RATE ?: '2'}" \
+  "${params.PERF_TEST_DURATION ?: '5m'}"
+"""
+            }
+            
+            // Archive performance test results as artifacts
+            archiveArtifacts artifacts: 'performance-results/**/*', allowEmptyArchive: true
+          }
+        }
+      }
+    }
+
+
+
+
+
 
     stage('Deployment Summary') {
       when {
