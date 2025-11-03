@@ -14,6 +14,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# Crear la red si no existe
+echo -e "${BLUE}[0/3]${NC} Creando red microservices_network si no existe..."
+docker network create microservices_network 2>/dev/null || echo "  Red ya existe"
+
 # 1. Levantar core.yml (Eureka, Config, Zipkin)
 echo -e "${BLUE}[1/3]${NC} Levantando servicios core (Eureka, Config, Zipkin)..."
 docker compose -f docker-compose/core.yml up -d
@@ -29,13 +33,17 @@ else
     echo -e "${YELLOW}⚠️  Eureka aún no responde (puede tardar más)${NC}"
 fi
 
-# 3. Levantar los 6 servicios principales
-echo -e "${BLUE}[3/3]${NC} Levantando los 6 servicios principales..."
+# 3. Levantar todos los servicios principales
+echo -e "${BLUE}[3/3]${NC} Levantando todos los servicios principales..."
 docker compose -f docker-compose/compose.yml up -d \
     api-gateway-container \
     user-service-container \
     product-service-container \
-    order-service-container
+    order-service-container \
+    payment-service-container \
+    favourite-service-container \
+    shipping-service-container \
+    proxy-client-container
 
 echo -e "${YELLOW}⏳ Esperando 60 segundos a que los servicios se registren...${NC}"
 sleep 60
@@ -55,14 +63,21 @@ done
 
 echo ""
 echo "🌐 URLs de acceso:"
-echo -e "  ${BLUE}API Gateway:${NC}        http://localhost:8080/app/actuator/health"
-echo -e "  ${BLUE}Eureka:${NC}              http://localhost:8761"
-echo -e "  ${BLUE}Config Server:${NC}       http://localhost:9296"
-echo -e "  ${BLUE}Zipkin:${NC}              http://localhost:9411"
+echo -e "  ${BLUE}API Gateway:${NC}        http://localhost:8080/actuator/health"
+echo -e "  ${BLUE}User Service:${NC}       http://localhost:8700/actuator/health"
+echo -e "  ${BLUE}Product Service:${NC}    http://localhost:8500/actuator/health"
+echo -e "  ${BLUE}Order Service:${NC}      http://localhost:8300/actuator/health"
+echo -e "  ${BLUE}Payment Service:${NC}    http://localhost:8400/actuator/health"
+echo -e "  ${BLUE}Favourite Service:${NC}  http://localhost:8800/actuator/health"
+echo -e "  ${BLUE}Shipping Service:${NC}   http://localhost:8600/actuator/health"
+echo -e "  ${BLUE}Proxy Client:${NC}       http://localhost:8900/actuator/health"
+echo -e "  ${BLUE}Eureka:${NC}             http://localhost:8761"
+echo -e "  ${BLUE}Config Server:${NC}      http://localhost:9296/actuator/health"
+echo -e "  ${BLUE}Zipkin:${NC}             http://localhost:9411"
 echo ""
 echo "🧪 Pruebas básicas:"
-echo "  curl http://localhost:8080/app/api/users"
-echo "  curl http://localhost:8080/app/api/products"
-echo "  curl http://localhost:8080/app/api/orders"
+echo "  curl http://localhost:8080/api/users"
+echo "  curl http://localhost:8080/api/products"
+echo "  curl http://localhost:8080/api/orders"
 echo ""
 echo -e "${GREEN}¡Listo para usar!${NC}"

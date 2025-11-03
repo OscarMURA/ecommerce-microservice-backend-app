@@ -1,18 +1,23 @@
 
 server:
   port: 9296
+  shutdown: graceful
 
 spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
   zipkin:
     base-url: ${SPRING_ZIPKIN_BASE_URL:http://localhost:9411/}
   application:
     name: CLOUD-CONFIG
   cloud:
     config:
+      enabled: false  # Deshabilitar Config Client - cloud-config no debe conectarse a sí mismo
       server:
-        git:
-          uri: https://github.com/SelimHorri/cloud-config-server
-          clone-on-start: true
+        native:
+          searchLocations: classpath:/configs
+  jmx:
+    enabled: false
 
 resilience4j:
   circuitbreaker:
@@ -39,7 +44,6 @@ management:
   endpoint:
     health:
       show-details: always
-
 
 
 

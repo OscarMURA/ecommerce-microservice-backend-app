@@ -58,6 +58,13 @@ The following are the initially required software pieces:
 
 1. **Spring Boot Initializer**: This *Initializer* generates *spring* boot project with just what you need to start quickly! Start from here https://start.spring.io/
 
+## Jenkins CI/CD
+
+Este repositorio incluye configuraciones declarativas para Jenkins en [`jenkins/`](jenkins/):
+
+- `Jenkins_Dev.groovy` ejecuta las pruebas unitarias, de integración y E2E en la VM creada por el job `Jenkins_Create_VM` (definido en el repo de infraestructura). 
+- Consulta [`jenkins/README.md`](jenkins/README.md) para los parámetros, credenciales y dependencias necesarias en tu servidor Jenkins.
+
 1. **Docker**: The fastest way to containerize applications on your desktop, and you can download it from here [https://www.docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop)
 
 1. **Kubernetes**: We can install **minikube** for testing puposes https://minikube.sigs.k8s.io/docs/start/
