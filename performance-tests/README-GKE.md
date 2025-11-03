@@ -233,3 +233,4 @@ El pipeline fallará si:
 **Integrado en**: `All-Services-Stage.groovy`  
 **Script principal**: `run-performance-gke.sh`
 
+
