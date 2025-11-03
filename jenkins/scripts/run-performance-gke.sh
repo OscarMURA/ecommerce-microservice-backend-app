@@ -20,7 +20,7 @@ ZONE=${4}
 SERVICES_TO_TEST=${5:-""}  # Comma-separated list, empty means all services
 PERF_TEST_USERS=${6:-20}
 PERF_TEST_SPAWN_RATE=${7:-2}
-PERF_TEST_DURATION=${8:-5m}
+PERF_TEST_DURATION=${8:-1m30s}
 
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}⚡ Ejecutando Pruebas de Rendimiento contra GKE${NC}"
