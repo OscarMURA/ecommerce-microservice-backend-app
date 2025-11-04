@@ -368,7 +368,7 @@ spec:
         - name: SERVER_PORT
           value: "${SERVICE_PORT}"
         - name: SPRING_PROFILES_ACTIVE
-          value: "prod"
+          value: "dev"
         - name: SPRING_CLOUD_CONFIG_ENABLED
           value: "false"
         - name: EUREKA_CLIENT_ENABLED
