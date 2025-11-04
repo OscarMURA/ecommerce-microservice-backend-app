@@ -380,8 +380,6 @@ spec:
           value: "dev"
         - name: SPRING_CLOUD_CONFIG_ENABLED
           value: "false"
-        - name: EUREKA_CLIENT_ENABLED
-          value: "false"
         resources:
           requests:
             cpu: 250m
