@@ -18,7 +18,7 @@ pipeline {
     booleanParam(name: 'FORCE_DEPLOY_ALL', defaultValue: false, description: 'Forzar despliegue de todos los servicios seleccionados')
     string(name: 'PERF_TEST_USERS', defaultValue: '50', description: 'Número de usuarios concurrentes para pruebas de rendimiento')
     string(name: 'PERF_TEST_SPAWN_RATE', defaultValue: '5', description: 'Usuarios creados por segundo (spawn rate)')
-    string(name: 'PERF_TEST_DURATION', defaultValue: '3m', description: 'Duración de las pruebas de rendimiento (ej: 1m30s, 5m)')
+    string(name: 'PERF_TEST_DURATION', defaultValue: '1m30s', description: 'Duración de las pruebas de rendimiento (ej: 1m30s, 5m)')
   }
 
   environment {
@@ -677,7 +677,7 @@ echo "🧪 Ejecutando pruebas E2E en ambiente de PRODUCCIÓN..."
               "GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}",
               "PERF_TEST_USERS=${params.PERF_TEST_USERS ?: '50'}",
               "PERF_TEST_SPAWN_RATE=${params.PERF_TEST_SPAWN_RATE ?: '5'}",
-              "PERF_TEST_DURATION=${params.PERF_TEST_DURATION ?: '3m'}",
+              "PERF_TEST_DURATION=${params.PERF_TEST_DURATION ?: '1m30s'}",
               "SERVICES_TO_DEPLOY=${env.SERVICES_TO_DEPLOY}"
             ]) {
               sh """
@@ -690,7 +690,7 @@ echo "⚡ Ejecutando pruebas de rendimiento en PRODUCCIÓN..."
   "${env.SERVICES_TO_DEPLOY}" \
   "${params.PERF_TEST_USERS ?: '50'}" \
   "${params.PERF_TEST_SPAWN_RATE ?: '5'}" \
-  "${params.PERF_TEST_DURATION ?: '3m'}"
+  "${params.PERF_TEST_DURATION ?: '1m30s'}"
 """
             }
             
@@ -768,14 +768,18 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
         echo "🎉 DESPLIEGUE A PRODUCCIÓN EXITOSO"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "📋 Build: #${env.BUILD_NUMBER}"
-        echo "📝 Release Notes: Revisar artefactos del build"
+        echo "📝 Release Notes: Disponible como artefacto del build"
+        echo "   📍 Ubicación: RELEASE_NOTES_${env.BUILD_NUMBER}.md"
+        echo "   📦 Descargar desde: Jenkins → Build #${env.BUILD_NUMBER} → Artefactos del Build"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         
         try {
-          sh("""curl -X POST "https://api.github.com/repos/OscarMURA/ecommerce-microservice-backend-app/statuses/${env.GIT_COMMIT}" \\
-            -H "Authorization: token \${GITHUB_TOKEN}" \\
-            -H "Content-Type: application/json" \\
-            -d '{"state":"success","description":"Jenkins: Production deployment successful","context":"ci/jenkins/all-services-prod"}'""")
+          withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
+            sh("""curl -X POST "https://api.github.com/repos/OscarMURA/ecommerce-microservice-backend-app/statuses/${env.GIT_COMMIT}" \\
+              -H "Authorization: token ${GITHUB_TOKEN}" \\
+              -H "Content-Type: application/json" \\
+              -d '{"state":"success","description":"Jenkins: Production deployment successful","context":"ci/jenkins/all-services-prod"}'""")
+          }
         } catch (Exception e) {
           echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
         }
@@ -792,10 +796,12 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         
         try {
-          sh("""curl -X POST "https://api.github.com/repos/OscarMURA/ecommerce-microservice-backend-app/statuses/${env.GIT_COMMIT}" \\
-            -H "Authorization: token \${GITHUB_TOKEN}" \\
-            -H "Content-Type: application/json" \\
-            -d '{"state":"failure","description":"Jenkins: Production deployment failed","context":"ci/jenkins/all-services-prod"}'""")
+          withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
+            sh("""curl -X POST "https://api.github.com/repos/OscarMURA/ecommerce-microservice-backend-app/statuses/${env.GIT_COMMIT}" \\
+              -H "Authorization: token ${GITHUB_TOKEN}" \\
+              -H "Content-Type: application/json" \\
+              -d '{"state":"failure","description":"Jenkins: Production deployment failed","context":"ci/jenkins/all-services-prod"}'""")
+          }
         } catch (Exception e) {
           echo "⚠️ No se pudo actualizar estado en GitHub: ${e.message}"
         }
