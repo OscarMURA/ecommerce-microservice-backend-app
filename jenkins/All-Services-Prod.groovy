@@ -335,6 +335,15 @@ gcloud container clusters get-credentials "${GKE_CLUSTER_NAME}" \
 echo "📦 Creando namespace si no existe..."
 kubectl create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
+# Para service-discovery, eliminar todos los pods antes de actualizar para forzar recreación con nueva configuración
+if [ "${SERVICE_NAME}" = "service-discovery" ]; then
+  echo "🗑️  Eliminando pods antiguos de service-discovery para forzar recreación con nueva configuración..."
+  kubectl delete pods -n "${K8S_NAMESPACE}" -l app=service-discovery --ignore-not-found=true || true
+  echo "⏳ Esperando 15 segundos para que los pods se eliminen completamente..."
+  sleep 15
+  echo "✅ Pods antiguos eliminados, procediendo con deployment..."
+fi
+
 echo "🚀 Desplegando ${SERVICE_NAME} en namespace ${K8S_NAMESPACE} (PRODUCCIÓN)..."
 
 kubectl apply -f - <<EOF
@@ -416,8 +425,8 @@ spec:
     name: http
 EOF
 
-echo "⏳ Esperando que el deployment esté listo (timeout 5 min)..."
-kubectl wait --for=condition=available --timeout=300s \
+echo "⏳ Esperando que el deployment esté listo (timeout 1:15 min)..."
+kubectl wait --for=condition=available --timeout=75s \
   deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} || {
   echo "❌ Timeout esperando deployment. Verificando estado..."
   echo ""
@@ -432,14 +441,15 @@ kubectl wait --for=condition=available --timeout=300s \
   kubectl describe deployment ${SERVICE_NAME} -n ${K8S_NAMESPACE}
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "📝 Logs de los Pods (últimas 50 líneas):"
+  echo "📝 Logs de los Pods (últimas 50 líneas - pod más reciente):"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME} -o name | head -1 | xargs -I {} kubectl logs {} -n ${K8S_NAMESPACE} --tail=50 || echo "⚠️ No se pudieron obtener logs"
+  # Obtener el pod más reciente ordenado por tiempo de creación
+  kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME} --sort-by=.metadata.creationTimestamp -o name | tail -1 | xargs -I {} kubectl logs {} -n ${K8S_NAMESPACE} --tail=50 || echo "⚠️ No se pudieron obtener logs"
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "🔍 Describe del Pod (para ver eventos):"
+  echo "🔍 Describe del Pod más reciente (para ver eventos):"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME} -o name | head -1 | xargs -I {} kubectl describe {} -n ${K8S_NAMESPACE} || echo "⚠️ No se pudo obtener describe del pod"
+  kubectl get pods -n ${K8S_NAMESPACE} -l app=${SERVICE_NAME} --sort-by=.metadata.creationTimestamp -o name | tail -1 | xargs -I {} kubectl describe {} -n ${K8S_NAMESPACE} || echo "⚠️ No se pudo obtener describe del pod"
   exit 1
 }
 
