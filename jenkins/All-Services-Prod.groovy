@@ -423,8 +423,8 @@ spec:
     name: http
 EOF
 
-echo "⏳ Esperando que el deployment esté listo (timeout 1:15 min)..."
-kubectl wait --for=condition=available --timeout=75s \
+echo "⏳ Esperando que el deployment esté listo (timeout 2:30 min)..."
+kubectl wait --for=condition=available --timeout=150s \
   deployment/${SERVICE_NAME} -n ${K8S_NAMESPACE} || {
   echo "❌ Timeout esperando deployment. Verificando estado..."
   echo ""
