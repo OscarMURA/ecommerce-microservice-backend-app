@@ -1,3 +1,0 @@
-Method,Name,Error,Occurrences
-GET,/shipping-service/api/order-items,CatchResponseError('Get order items failed: 404'),631
-POST,/shipping-service/api/order-items,CatchResponseError('Order item creation failed: 404'),759

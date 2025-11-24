@@ -1,0 +1,27 @@
+[submodule "service-discovery"]
+	path = service-discovery
+	url = https://github.com/Ecommerce-Microservice-Lab/service-discovery.git
+[submodule "favourite-service"]
+	path = favourite-service
+	url = https://github.com/Ecommerce-Microservice-Lab/favourite-service.git
+[submodule "order-service"]
+	path = order-service
+	url = https://github.com/Ecommerce-Microservice-Lab/order-service.git
+[submodule "payment-service"]
+	path = payment-service
+	url = https://github.com/Ecommerce-Microservice-Lab/payment-service.git
+[submodule "product-service"]
+	path = product-service
+	url = https://github.com/Ecommerce-Microservice-Lab/product-service.git
+[submodule "shipping-service"]
+	path = shipping-service
+	url = https://github.com/Ecommerce-Microservice-Lab/shipping-service.git
+[submodule "user-service"]
+	path = user-service
+	url = https://github.com/Ecommerce-Microservice-Lab/user-service.git
+[submodule "e2e-tests"]
+	path = e2e-tests
+	url = https://github.com/Ecommerce-Microservice-Lab/e2e-tests.git
+[submodule "performance-tests"]
+	path = performance-tests
+	url = https://github.com/Ecommerce-Microservice-Lab/performance-tests.git

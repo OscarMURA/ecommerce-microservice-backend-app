@@ -1,4 +1,0 @@
-Method,Name,Error,Occurrences
-GET,/favourite-service/api/favourites,CatchResponseError('Get favourites failed: 0'),420
-POST,/favourite-service/api/favourites,CatchResponseError('Add favourite failed: 400'),239
-POST,/favourite-service/api/favourites,CatchResponseError('Add favourite failed: 0'),509

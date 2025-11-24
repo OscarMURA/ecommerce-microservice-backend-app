@@ -1,3 +1,0 @@
-Method,Name,Error,Occurrences
-POST,/product-service/api/products,CatchResponseError('Product creation failed: 400'),753
-POST,/product-service/api/categories,CatchResponseError('Category creation failed: 400'),566

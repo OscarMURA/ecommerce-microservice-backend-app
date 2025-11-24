@@ -1,2 +1,0 @@
-Method,Name,Error,Occurrences
-POST,/user-service/api/users,CatchResponseError('User creation failed: 400'),154

@@ -1,2 +1,0 @@
-Method,Name,Error,Occurrences
-POST,/payment-service/api/payments,CatchResponseError('Payment creation failed: 400'),460
