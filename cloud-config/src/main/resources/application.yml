@@ -38,12 +38,20 @@ management:
     web:
       exposure:
         include: "*"
-  health:
-    circuitbreakers:
-      enabled: true
   endpoint:
     health:
       show-details: always
+    prometheus:
+      enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: ${spring.application.name}
+  health:
+    circuitbreakers:
+      enabled: true
 
 
 
